@@ -4,10 +4,24 @@ body {
     margin: 20px;
 }
 
-textarea {
-    width: 80%;
-    height: 200px;
+#fieldsContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     margin-top: 10px;
+}
+
+.field {
+    margin: 5px;
+}
+
+.field label {
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.field input {
+    width: 200px;
 }
 
 button {
