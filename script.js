@@ -1,5 +1,5 @@
 // Specify the H.265 (HEVC) version supported by the script
-const version = 10
+const version = 11
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -62,9 +62,6 @@ function extractFields(nalType, data) {
             fields.push({ name: `vps_hrd_layer_set_idx[${i}]`, value: (data[16 + i * 2] >> 2) & 0x3F });
         }
         fields.push({ name: "vps_cprms_present_flag", value: (data[16 + (data[15] >> 6) * 2] >> 7) & 0x01 });
-        fields.push({ name: "vps_sar_width", value: (data[16 + (data[15] >> 6) * 2] >> 0) & 0x1F });
-        fields.push({ name: "vps_sar_height", value: (data[17 + (data[15] >> 6) * 2] >> 0) & 0x1F });
-        fields.push({ name: "vps_conformance_window_flag", value: (data[17 + (data[15] >> 6) * 2] >> 6) & 0x01 });
     } else if (nalType === 33) {
         fields.push({ name: "sps_seq_parameter_set_id", value: data[5] & 0x1F });
         fields.push({ name: "sps_video_parameter_set_id", value: (data[5] >> 7) & 0x1F });
@@ -75,12 +72,11 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_chroma_format_idc", value: data[8] & 0x0F });
         fields.push({ name: "sps_pic_width_in_luma_samples", value: data[9] + (data[10] << 8) });
         fields.push({ name: "sps_pic_height_in_luma_samples", value: data[11] + (data[12] << 8) });
-        fields.push({ name: "sps_conformance_window_flag", value: (data[13] >> 7) & 0x01 });
+        fields.push({ name: "sps_poc_width_in_luma_samples", value: data[13] + (data[14] << 8) });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[4] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
         fields.push({ name: "pps_reserved_three_2bits", value: (data[6] >> 6) & 0x03 });
-        fields.push({ name: "pps_conformance_window_flag", value: (data[7] >> 6) & 0x01 });
     }
     return fields;
 }
@@ -100,3 +96,10 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
     const blob = new Blob([modifiedData], { type: "application/octet-stream" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
+    a.download = "updated.h265";
+    a.click();
+});
+
+function modifyStream() {
+    return originalData || new Uint8Array([]);
+}
