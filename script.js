@@ -1,6 +1,5 @@
-
 // Specify the H.265 (HEVC) version supported by the script
-const version = 21
+const version = 22
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -40,7 +39,7 @@ function getNALName(nalType) {
 function extractFields(nalType, data) {
     let fields = [];
     if (nalType === 32) {
-        fields.push({ name: "vps_video_parameter_set_id", value: data[4] & 0x3F });
+        fields.push({ name: "vps_video_parameter_set_id", value: (data[5] >> 7) & 0x1F });
         fields.push({ name: "vps_reserved_three_2bits", value: (data[4] >> 6) & 0x03 });
         fields.push({ name: "vps_reserved_0xffff_16bits", value: data[5] + (data[6] << 8) });
         fields.push({ name: "vps_extension_flag", value: (data[7] >> 7) & 0x01 });
@@ -85,4 +84,4 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_amp_enabled_flag", value: (data[26] >> 4) & 0x01 });
         fields.push({ name: "sps_sample_adaptive_offset_enabled_flag", value: (data[26] >> 3) & 0x01 });
         fields.push({ name: "sps_pcm_enabled_flag", value: (data[27] >> 7) & 0x01 });
-        fields.push({ name: "sps_pcm_sample_bit_depth_luma_minus1", value: (data[27] >>
+        fields.push({ name: "sps_pcm_sample_bit_depth_luma_minus1", value: (data[27]
