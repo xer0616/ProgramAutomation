@@ -1,5 +1,6 @@
+
 // Specify the H.265 (HEVC) version supported by the script
-const version = 29
+const version = 30
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -50,6 +51,7 @@ function extractFields(nalType, data) {
         fields.push({ name: "vps_max_dpb_size", value: (data[9] >> 0) & 0x0F });
         fields.push({ name: "vps_max_num_reorder_pics", value: (data[9] >> 0) & 0x0F });
         fields.push({ name: "vps_max_latency_increase_plus1", value: data[10] });
+        fields.push({ name: "vps_poc_proportional_to_timing_flag", value: (data[11] >> 6) & 0x01 });
         fields.push({ name: "vps_max_layer_id", value: data[11] });
         fields.push({ name: "vps_layer_id_included_flag", value: (data[12] >> 7) & 0x01 });
         fields.push({ name: "vps_max_dec_pic_buffering_minus1", value: (data[12] + (data[13] << 8)) >> 1 });
