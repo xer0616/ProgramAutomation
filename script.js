@@ -1,4 +1,4 @@
-const version = 18
+const version = 19
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -59,6 +59,8 @@ function extractFields(nalType, data) {
         // Added log2_max_pic_order_cnt_lsb_minus4 field
         fields.push({ name: "sps_log2_max_pic_order_cnt_lsb_minus4", value: (data[9] >> 4) & 0x0F });
         fields.push({ name: "sps_max_dec_pic_buffering_minus1", value: (data[9] & 0x0F) }); // Added max_dec_pic_buffering_minus1 field
+        // Added sps_max_num_reorder_pics field
+        fields.push({ name: "sps_max_num_reorder_pics", value: data[10] & 0x3F });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
