@@ -1,4 +1,4 @@
-const version = 20
+const version = 21
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -56,12 +56,11 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_conf_win_bottom_offset", value: ((data[27] & 0x03) << 16) | ((data[28] & 0xFF) << 8) | data[29] }); // Added conf_win_bottom_offset field
         fields.push({ name: "sps_bit_depth_luma_minus8", value: (data[8] >> 4) & 0x03 }); // Added bit_depth_luma_minus8 field
         fields.push({ name: "sps_bit_depth_chroma_minus8", value: data[8] & 0x03 }); // Added bit_depth_chroma_minus8 field
-        // Added log2_max_pic_order_cnt_lsb_minus4 field
-        fields.push({ name: "sps_log2_max_pic_order_cnt_lsb_minus4", value: (data[9] >> 4) & 0x0F });
+        fields.push({ name: "sps_log2_max_pic_order_cnt_lsb_minus4", value: (data[9] >> 4) & 0x0F }); // Added log2_max_pic_order_cnt_lsb_minus4 field
         fields.push({ name: "sps_max_dec_pic_buffering_minus1", value: (data[9] & 0x0F) }); // Added max_dec_pic_buffering_minus1 field
-        // Added sps_max_num_reorder_pics field
-        fields.push({ name: "sps_max_num_reorder_pics", value: data[10] & 0x3F });
+        fields.push({ name: "sps_max_num_reorder_pics", value: data[10] & 0x3F }); // Added sps_max_num_reorder_pics field
         fields.push({ name: "sps_max_latency_increase_plus1", value: (data[10] >> 6) & 0x03 }); // Added max_latency_increase_plus1 field
+        fields.push({ name: "sps_log2_min_luma_coding_block_size_minus3", value: (data[11] & 0x0F) }); // Added log2_min_luma_coding_block_size_minus3 field
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
@@ -100,9 +99,4 @@ function modifyStream() {
                 // Update SPS
                 // ... Modify fields here ...
                 // For example:
-                data[i + 25] = 2; // Set sps_max_latency_increase_plus1 to 2
-            }
-        }
-    }
-    return data;
-}
+                data[i + 25] = 2; // Set s
