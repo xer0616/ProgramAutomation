@@ -1,5 +1,5 @@
 
-const version = 8
+const version = 9
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -49,6 +49,7 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_temporal_id_nesting_flag", value: (data[7] >> 7) & 0x01 });
         fields.push({ name: "sps_separate_colour_plane_flag", value: (data[7] >> 6) & 0x01 });
         fields.push({ name: "sps_pic_width_in_luma_samples", value: ((data[12] & 0x03) << 16) | ((data[13] & 0xFF) << 8) | data[14] });
+        fields.push({ name: "sps_pic_height_in_luma_samples", value: ((data[15] & 0x03) << 16) | ((data[16] & 0xFF) << 8) | data[17] });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
