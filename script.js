@@ -1,6 +1,5 @@
-
 // Specify the H.265 (HEVC) version supported by the script
-const version = 36
+const version = 35
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -64,27 +63,34 @@ function extractFields(nalType, data) {
         }
         fields.push({ name: "vps_cprms_present_flag", value: (data[16 + (data[15] >> 6) * 2] >> 7) & 0x01 });
     } else if (nalType === 33) {
-        fields.push({ name: "sps_video_parameter_set_id", value: data[4] & 0x3F });
         fields.push({ name: "sps_seq_parameter_set_id", value: data[5] & 0x1F });
-        fields.push({ name: "sps_chroma_format_idc", value: (data[6] >> 4) & 0x0F });
-        fields.push({ name: "sps_bit_depth_luma_minus8", value: data[7] & 0x0F });
-        fields.push({ name: "sps_bit_depth_chroma_minus8", value: (data[8] >> 4) & 0x0F });
-        fields.push({ name: "sps_log2_max_pic_order_cnt_lsb_minus4", value: (data[8] >> 0) & 0x0F });
-        fields.push({ name: "sps_sps_max_minus1_sub_layer_deltas_present_flag", value: (data[9] >> 7) & 0x01 });
-        fields.push({ name: "sps_sps_max_sub_layers_minus1", value: (data[9] >> 5) & 0x07 });
-        fields.push({ name: "sps_spc_sbtmvp_flag", value: (data[9] >> 4) & 0x01 });
-        fields.push({ name: "sps_sps_sbt_mvp_skip_flag", value: (data[9] >> 3) & 0x01 });
-        fields.push({ name: "sps_sps_temporal_mvp_enable_flag", value: (data[9] >> 2) & 0x01 });
-        fields.push({ name: "sps_sps_strong_intra_smoothing_enable_flag", value: (data[9] >> 1) & 0x01 });
-        fields.push({ name: "sps_vui_parameters_present_flag", value: data[9] & 0x01 });
+        fields.push({ name: "sps_max_sub_layers_minus1", value: (data[6] >> 5) & 0x07 });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[4] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
-        fields.push({ name: "pps_dependent_slice_segments_enabled_flag", value: (data[7] >> 7) & 0x01 });
-        fields.push({ name: "pps_output_flag_present_flag", value: (data[7] >> 6) & 0x01 });
-        fields.push({ name: "pps_num_extra_slice_header_bits", value: data[7] & 0x1F });
-        fields.push({ name: "pps_sign_data_hiding_enabled_flag", value: (data[8] >> 7) & 0x01 });
-        fields.push({ name: "pps_cabac_init_present_flag", value: (data[8] >> 6) & 0x01 });
-        fields.push({ name: "pps_num_reorder_pics", value: (data[8] >> 0) & 0x3F });
-        fields.push({ name: "pps_max_num_reorder_pics", value: data[9] });
-        fields.push({ name: "pps_max_dec_pic
+    }
+    return fields;
+}
+
+function displayFields(nalName, fields) {
+    const container = document.getElementById("fieldsContainer");
+    fields.forEach(field => {
+        const fieldDiv = document.createElement("div");
+        fieldDiv.className = "field";
+        fieldDiv.innerHTML = `<label>${nalName} - ${field.name}:</label> <input type="text" value="${field.value}">`;
+        container.appendChild(fieldDiv);
+    });
+}
+
+document.getElementById("downloadBtn").addEventListener("click", function() {
+    const modifiedData = modifyStream();
+    const blob = new Blob([modifiedData], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "updated.h265";
+    a.click();
+});
+
+function modifyStream() {
+    return originalData || new Uint8Array([]);
+}
