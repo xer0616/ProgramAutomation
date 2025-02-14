@@ -1,5 +1,6 @@
+
 // Specify the H.265 (HEVC) version supported by the script
-const version = 14
+const version = 15
 document.getElementById("version").innerText = version;
 
 let originalData = null;
