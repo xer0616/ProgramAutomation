@@ -1,5 +1,5 @@
 
-const version = 16
+const version = 17
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -57,6 +57,8 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_conf_win_bottom_offset", value: ((data[27] & 0x03) << 16) | ((data[28] & 0xFF) << 8) | data[29] }); // Added conf_win_bottom_offset field
         fields.push({ name: "sps_bit_depth_luma_minus8", value: (data[8] >> 4) & 0x03 }); // Added bit_depth_luma_minus8 field
         fields.push({ name: "sps_bit_depth_chroma_minus8", value: data[8] & 0x03 }); // Added bit_depth_chroma_minus8 field
+        // Added log2_max_pic_order_cnt_lsb_minus4 field
+        fields.push({ name: "sps_log2_max_pic_order_cnt_lsb_minus4", value: (data[9] >> 4) & 0x0F });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
