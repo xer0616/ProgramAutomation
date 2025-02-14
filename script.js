@@ -1,4 +1,5 @@
-const version = 29
+
+const version = 30
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -59,6 +60,7 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_max_dec_pic_buffering_minus1", value: (data[9] & 0x0F) });
         fields.push({ name: "sps_max_num_reorder_pics", value: data[10] & 0x3F });
         fields.push({ name: "sps_max_latency_increase_plus1", value: (data[10] >> 6) & 0x03 });
+        fields.push({ name: "sps_conformance_window_flag", value: (data[11] >> 7) & 0x01 });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
