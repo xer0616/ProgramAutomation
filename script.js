@@ -1,4 +1,5 @@
-const version = 15
+
+const version = 16
 document.getElementById("version").innerText = version;
 let originalData = null;
 
