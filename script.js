@@ -1,7 +1,7 @@
 // H.265 stream parser and editor
 
 // Specify the H.265 (HEVC) version supported by the script
-const version = 10
+const version = 11
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -49,6 +49,7 @@ function extractFields(nalType, data) {
         fields.push({ name: "vps_max_dec_pic_buffering_minus1", value: (data[7] >> 4) & 0x03 });
         fields.push({ name: "vps_max_layers_minus1", value: (data[8] >> 3) & 0x1F });
         fields.push({ name: "vps_max_sub_layers_minus1", value: data[8] & 0x07 });
+        fields.push({ name: "vps_max_num_reorder_pics", value: (data[9] >> 5) & 0x07 });
     } else if (nalType === 33) {
         fields.push({ name: "sps_seq_parameter_set_id", value: data[5] & 0x1F });
         fields.push({ name: "sps_max_sub_layers_minus1", value: (data[6] >> 5) & 0x07 });
