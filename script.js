@@ -1,7 +1,7 @@
 // H.265 stream parser and editor
 
 // Specify the H.265 (HEVC) version supported by the script
-const version = 3
+const version = 4
 document.getElementById("version").innerText = version;
 
 let originalData = null;
