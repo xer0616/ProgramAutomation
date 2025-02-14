@@ -1,5 +1,5 @@
 
-const version = 2
+const version = 3
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -43,7 +43,7 @@ function extractFields(nalType, data) {
     } else if (nalType === 33) {
         fields.push({ name: "sps_video_parameter_set_id", value: data[4] & 0x7F });
         fields.push({ name: "sps_seq_parameter_set_id", value: data[5] & 0x1F });
-        fields.push({ name: "sps_max_sub_layers_minus1", value: (data[6] >> 5) & 0x07 });
+        fields.push({ name: "sps_max_sub_layers_minus1", value: data[6] & 0x07 });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
