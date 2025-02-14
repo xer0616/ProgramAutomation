@@ -1,6 +1,5 @@
-
 // Specify the H.265 (HEVC) version supported by the script
-const version = 13
+const version = 14
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -64,8 +63,8 @@ function extractFields(nalType, data) {
         }
         fields.push({ name: "vps_cprms_present_flag", value: (data[16 + (data[15] >> 6) * 2] >> 7) & 0x01 });
     } else if (nalType === 33) {
-        fields.push({ name: "sps_seq_parameter_set_id", value: data[5] & 0x1F });
         fields.push({ name: "sps_video_parameter_set_id", value: (data[5] >> 7) & 0x1F });
+        fields.push({ name: "sps_seq_parameter_set_id", value: data[5] & 0x1F });
         fields.push({ name: "sps_reserved_three_4bits", value: (data[5] >> 3) & 0x07 });
         fields.push({ name: "sps_max_sub_layers_minus1", value: (data[6] >> 5) & 0x07 });
         fields.push({ name: "sps_temporal_id_nesting_flag", value: (data[7] >> 3) & 0x01 });
