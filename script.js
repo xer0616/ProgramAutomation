@@ -1,4 +1,5 @@
-const version = 1;
+
+const version = 2
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -36,10 +37,11 @@ function getNALName(nalType) {
 function extractFields(nalType, data) {
     let fields = [];
     if (nalType === 32) {
-        fields.push({ name: "vps_video_parameter_set_id", value: data[5] & 0x0F });
-        fields.push({ name: "vps_max_layers_minus1", value: (data[6] >> 3) & 0x1F });
-        fields.push({ name: "vps_max_sub_layers_minus1", value: data[6] & 0x07 });
+        fields.push({ name: "vps_video_parameter_set_id", value: data[4] & 0x7F });
+        fields.push({ name: "vps_max_layers_minus1", value: (data[5] >> 3) & 0x1F });
+        fields.push({ name: "vps_max_sub_layers_minus1", value: data[5] & 0x07 });
     } else if (nalType === 33) {
+        fields.push({ name: "sps_video_parameter_set_id", value: data[4] & 0x7F });
         fields.push({ name: "sps_seq_parameter_set_id", value: data[5] & 0x1F });
         fields.push({ name: "sps_max_sub_layers_minus1", value: (data[6] >> 5) & 0x07 });
     } else if (nalType === 34) {
