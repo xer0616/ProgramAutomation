@@ -1,4 +1,4 @@
-const version = 21
+const version = 22
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -49,18 +49,18 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_separate_colour_plane_flag", value: (data[7] >> 6) & 0x01 });
         fields.push({ name: "sps_pic_width_in_luma_samples", value: ((data[12] & 0x03) << 16) | ((data[13] & 0xFF) << 8) | data[14] });
         fields.push({ name: "sps_pic_height_in_luma_samples", value: ((data[15] & 0x03) << 16) | ((data[16] & 0xFF) << 8) | data[17] });
-        fields.push({ name: "sps_conformance_window_flag", value: (data[11] >> 4) & 0x01 }); // Added conformance_window_flag field
         fields.push({ name: "sps_conf_win_left_offset", value: ((data[18] & 0x03) << 16) | ((data[19] & 0xFF) << 8) | data[20] }); // Added conf_win_left_offset field
         fields.push({ name: "sps_conf_win_right_offset", value: ((data[21] & 0x03) << 16) | ((data[22] & 0xFF) << 8) | data[23] }); // Added conf_win_right_offset field
         fields.push({ name: "sps_conf_win_top_offset", value: ((data[24] & 0x03) << 16) | ((data[25] & 0xFF) << 8) | data[26] }); // Added conf_win_top_offset field
         fields.push({ name: "sps_conf_win_bottom_offset", value: ((data[27] & 0x03) << 16) | ((data[28] & 0xFF) << 8) | data[29] }); // Added conf_win_bottom_offset field
         fields.push({ name: "sps_bit_depth_luma_minus8", value: (data[8] >> 4) & 0x03 }); // Added bit_depth_luma_minus8 field
         fields.push({ name: "sps_bit_depth_chroma_minus8", value: data[8] & 0x03 }); // Added bit_depth_chroma_minus8 field
-        fields.push({ name: "sps_log2_max_pic_order_cnt_lsb_minus4", value: (data[9] >> 4) & 0x0F }); // Added log2_max_pic_order_cnt_lsb_minus4 field
+        // Added log2_max_pic_order_cnt_lsb_minus4 field
+        fields.push({ name: "sps_log2_max_pic_order_cnt_lsb_minus4", value: (data[9] >> 4) & 0x0F });
         fields.push({ name: "sps_max_dec_pic_buffering_minus1", value: (data[9] & 0x0F) }); // Added max_dec_pic_buffering_minus1 field
-        fields.push({ name: "sps_max_num_reorder_pics", value: data[10] & 0x3F }); // Added sps_max_num_reorder_pics field
+        // Added sps_max_num_reorder_pics field
+        fields.push({ name: "sps_max_num_reorder_pics", value: data[10] & 0x3F });
         fields.push({ name: "sps_max_latency_increase_plus1", value: (data[10] >> 6) & 0x03 }); // Added max_latency_increase_plus1 field
-        fields.push({ name: "sps_log2_min_luma_coding_block_size_minus3", value: (data[11] & 0x0F) }); // Added log2_min_luma_coding_block_size_minus3 field
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
@@ -88,7 +88,6 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
     a.click();
 });
 
-// Updated code
 function modifyStream() {
     if (!originalData) return;
     let data = new Uint8Array(originalData); // Create a copy of the original data
@@ -99,4 +98,9 @@ function modifyStream() {
                 // Update SPS
                 // ... Modify fields here ...
                 // For example:
-                data[i + 25] = 2; // Set s
+                data[i + 25] = 2; // Set sps_max_latency_increase_plus1 to 2
+            }
+        }
+    }
+    return data;
+}
