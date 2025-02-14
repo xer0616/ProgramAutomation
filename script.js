@@ -1,5 +1,9 @@
-const version = 4
+// H.265 stream parser and editor
+
+// Specify the H.265 (HEVC) version supported by the script
+const version = 3
 document.getElementById("version").innerText = version;
+
 let originalData = null;
 
 fetch("original.h265")
@@ -28,7 +32,8 @@ function getNALName(nalType) {
     const nalMap = {
         32: "VPS",
         33: "SPS",
-        34: "PPS"
+        34: "PPS",
+        48: "IDR"
     };
     return nalMap[nalType] || `NAL Type ${nalType}`;
 }
