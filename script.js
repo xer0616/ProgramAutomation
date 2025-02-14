@@ -1,6 +1,6 @@
 
 // Specify the H.265 (HEVC) version supported by the script
-const version = 20
+const version = 21
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -77,33 +77,12 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_conformance_window_flag", value: (data[17] >> 7) & 0x01 });
         fields.push({ name: "sps_separate_colour_plane_flag", value: (data[17] >> 6) & 0x01 });
         fields.push({ name: "sps_conf_win_left_offset", value: data[18] + (data[19] << 8) });
-    } else if (nalType === 34) {
-        fields.push({ name: "pps_pic_parameter_set_id", value: data[4] & 0x3F });
-        fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
-        fields.push({ name: "pps_reserved_three_2bits", value: (data[6] >> 6) & 0x03 });
-    }
-    return fields;
-}
-
-function displayFields(nalName, fields) {
-    const container = document.getElementById("fieldsContainer");
-    fields.forEach(field => {
-        const fieldDiv = document.createElement("div");
-        fieldDiv.className = "field";
-        fieldDiv.innerHTML = `<label>${nalName} - ${field.name}:</label> <input type="text" value="${field.value}">`;
-        container.appendChild(fieldDiv);
-    });
-}
-
-document.getElementById("downloadBtn").addEventListener("click", function() {
-    const modifiedData = modifyStream();
-    const blob = new Blob([modifiedData], { type: "application/octet-stream" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "updated.h265";
-    a.click();
-});
-
-function modifyStream() {
-    return originalData || new Uint8Array([]);
-}
+        fields.push({ name: "sps_conf_win_top_offset", value: data[20] + (data[21] << 8) });
+        fields.push({ name: "sps_conf_win_right_offset", value: data[22] + (data[23] << 8) });
+        fields.push({ name: "sps_conf_win_bottom_offset", value: data[24] + (data[25] << 8) });
+        fields.push({ name: "sps_scaling_list_enable_flag", value: (data[26] >> 6) & 0x03 });
+        fields.push({ name: "sps_scaling_list_data_present_flag", value: (data[26] >> 5) & 0x01 });
+        fields.push({ name: "sps_amp_enabled_flag", value: (data[26] >> 4) & 0x01 });
+        fields.push({ name: "sps_sample_adaptive_offset_enabled_flag", value: (data[26] >> 3) & 0x01 });
+        fields.push({ name: "sps_pcm_enabled_flag", value: (data[27] >> 7) & 0x01 });
+        fields.push({ name: "sps_pcm_sample_bit_depth_luma_minus1", value: (data[27] >>
