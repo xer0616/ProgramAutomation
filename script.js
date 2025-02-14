@@ -1,5 +1,5 @@
 
-const version = 10
+const version = 11
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -51,6 +51,10 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_pic_width_in_luma_samples", value: ((data[12] & 0x03) << 16) | ((data[13] & 0xFF) << 8) | data[14] });
         fields.push({ name: "sps_pic_height_in_luma_samples", value: ((data[15] & 0x03) << 16) | ((data[16] & 0xFF) << 8) | data[17] });
         fields.push({ name: "sps_conformance_window_flag", value: (data[11] >> 4) & 0x01 }); // Added conformance_window_flag field
+        fields.push({ name: "sps_conf_win_left_offset", value: ((data[18] & 0x03) << 16) | ((data[19] & 0xFF) << 8) | data[20] }); // Added conf_win_left_offset field
+        fields.push({ name: "sps_conf_win_right_offset", value: ((data[21] & 0x03) << 16) | ((data[22] & 0xFF) << 8) | data[23] }); // Added conf_win_right_offset field
+        fields.push({ name: "sps_conf_win_top_offset", value: ((data[24] & 0x03) << 16) | ((data[25] & 0xFF) << 8) | data[26] }); // Added conf_win_top_offset field
+        fields.push({ name: "sps_conf_win_bottom_offset", value: ((data[27] & 0x03) << 16) | ((data[28] & 0xFF) << 8) | data[29] }); // Added conf_win_bottom_offset field
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[5] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
