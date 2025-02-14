@@ -1,5 +1,6 @@
+
 // Specify the H.265 (HEVC) version supported by the script
-const version = 22
+const version = 23
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -39,7 +40,7 @@ function getNALName(nalType) {
 function extractFields(nalType, data) {
     let fields = [];
     if (nalType === 32) {
-        fields.push({ name: "vps_video_parameter_set_id", value: (data[5] >> 7) & 0x1F });
+        fields.push({ name: "vps_video_parameter_set_id", value: data[4] & 0x3F });
         fields.push({ name: "vps_reserved_three_2bits", value: (data[4] >> 6) & 0x03 });
         fields.push({ name: "vps_reserved_0xffff_16bits", value: data[5] + (data[6] << 8) });
         fields.push({ name: "vps_extension_flag", value: (data[7] >> 7) & 0x01 });
