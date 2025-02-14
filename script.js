@@ -1,5 +1,5 @@
 
-const version = 30
+const version = 31
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -77,6 +77,7 @@ function displayFields(nalName, fields) {
         fieldDiv.innerHTML = `<label>${nalName} - ${field.name}:</label> <input type="text" value="${field.value}">`;
         container.appendChild(fieldDiv);
     });
+    document.getElementById("downloadBtn").disabled = false;
 }
 
 document.getElementById("downloadBtn").addEventListener("click", function() {
