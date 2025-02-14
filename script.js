@@ -1,5 +1,4 @@
-
-const version = 23
+const version = 24
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -99,7 +98,7 @@ function modifyStream() {
                 // Update SPS
                 // ... Modify fields here ...
                 // For example:
-                data[i + 25] = 2; // Set sps_max_latency_increase_plus1 to 2
+                data[i + 25] = 3; // Set sps_max_latency_increase_plus1 to 3
             }
         }
     }
