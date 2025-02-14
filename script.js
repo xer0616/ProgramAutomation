@@ -1,4 +1,4 @@
-const version = 27
+const version = 28
 document.getElementById("version").innerText = version;
 let originalData = null;
 
