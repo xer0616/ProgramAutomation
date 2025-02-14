@@ -1,6 +1,5 @@
-
 // Specify the H.265 (HEVC) version supported by the script
-const version = 15
+const version = 16
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -74,6 +73,7 @@ function extractFields(nalType, data) {
         fields.push({ name: "sps_pic_width_in_luma_samples", value: data[9] + (data[10] << 8) });
         fields.push({ name: "sps_pic_height_in_luma_samples", value: data[11] + (data[12] << 8) });
         fields.push({ name: "sps_poc_width_in_luma_samples", value: data[13] + (data[14] << 8) });
+        fields.push({ name: "sps_separate_colour_plane_flag", value: (data[15] >> 7) & 0x01 });
     } else if (nalType === 34) {
         fields.push({ name: "pps_pic_parameter_set_id", value: data[4] & 0x3F });
         fields.push({ name: "pps_seq_parameter_set_id", value: data[6] & 0x1F });
