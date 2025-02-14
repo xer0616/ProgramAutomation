@@ -2,7 +2,7 @@
 // H.265 stream parser and editor
 
 // Specify the H.265 (HEVC) version supported by the script
-const version = 7
+const version = 8
 document.getElementById("version").innerText = version;
 
 let originalData = null;
@@ -81,4 +81,4 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     return originalData || new Uint8Array([]);
-} 
+}
