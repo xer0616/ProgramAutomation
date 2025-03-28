@@ -1,5 +1,5 @@
 
-const version = 4
+const version = 5
 // Ensure the element exists before setting innerText
 const versionElement = document.getElementById("version");
 if (versionElement) {
@@ -80,18 +80,20 @@ function processNalUnit(nalUnitData) {
         return; // Need at least 2 bytes for H.265 NAL header
     }
 
-    // H.265 NAL Unit Header (2 bytes)
+    // H.265 NAL Unit Header (2 bytes) - ITU-T H.265 Section 7.3.1.1
     const headerByte1 = nalUnitData[0];
     const headerByte2 = nalUnitData[1];
 
-    // forbidden_zero_bit: f(1) (bit 0) - Should be 0
+    // forbidden_zero_bit: f(1) (bit 7 of byte 0) - Should be 0
     const forbiddenZeroBit = (headerByte1 >> 7) & 0x01;
-    // nal_unit_type: u(6) (bits 6-1)
+    // nal_unit_type: u(6) (bits 6-1 of byte 0)
     const nalType = (headerByte1 & 0x7E) >> 1;
-    // nuh_layer_id: u(6) (bits 5-0 of byte 2, combined with bit 0 of byte 1)
-    const nuhLayerId = ((headerByte1 & 0x01) << 5) | ((headerByte2 >> 3) & 0x1F);
-    // nuh_temporal_id_plus1: u(3) (bits 2-0 of byte 2)
+    // nuh_layer_id: u(6) (bit 0 of byte 0 combined with bits 7-3 of byte 1)
+    // Corrected combination: Bit 0 of Byte 1 is actually part of temporal_id_plus1
+    const nuhLayerId = headerByte2 >> 3; // Upper 5 bits of byte 1
+    // nuh_temporal_id_plus1: u(3) (bits 2-0 of byte 1)
     const nuhTemporalIdPlus1 = headerByte2 & 0x07;
+
 
     const nalName = getNALName(nalType);
 
@@ -99,7 +101,10 @@ function processNalUnit(nalUnitData) {
         console.warn(`Forbidden zero bit is not zero (${forbiddenZeroBit}) for NAL Unit ${nalName} (${nalType}).`);
     }
     if (nuhTemporalIdPlus1 === 0) {
-        console.warn(`Temporal ID Plus 1 is zero for NAL Unit ${nalName} (${nalType}), which is invalid.`);
+        // Note: TemporalIdPlus1 being 0 is *valid* according to the spec (temporal_id = 0).
+        // The previous warning might have been based on a misunderstanding or specific profile constraint.
+        // Keeping the log for now, but it might not indicate an error.
+        // console.log(`Temporal ID Plus 1 is zero for NAL Unit ${nalName} (${nalType}), meaning temporal_id = 0.`);
     }
 
     // The NAL unit payload (RBSP) starts after the 2-byte header.
@@ -139,7 +144,7 @@ function getNALName(nalType) {
         // 41-47 Reserved
         // 48-63 Unspecified
     };
-    if (nalType >= 24 && nalType <= 31) return `RSV_NVCL (${nalType})`;
+    if (nalType >= 24 && nalType <= 31) return `RSV_NVCL (${nalType})`; // Renamed from VCL to NVCL per spec Table 7-1 for this range
     if (nalType >= 41 && nalType <= 47) return `RSV_NVCL (${nalType})`;
     if (nalType >= 48 && nalType <= 63) return `UNSPEC (${nalType})`;
 
@@ -150,88 +155,141 @@ function extractFields(nalType, payloadData) {
     // --- IMPORTANT ---
     // This function provides a VERY simplified extraction for specific fields
     // in VPS/SPS/PPS based on direct byte access *without* proper RBSP handling
-    // (emulation prevention byte removal) or bitstream parsing (like Exp-Golomb).
+    // (emulation prevention byte removal 0x000003 -> 0x0000) or bitstream parsing (like Exp-Golomb).
     // This will be inaccurate for many fields and potentially incorrect if
-    // emulation prevention bytes (0x03) are present.
+    // emulation prevention bytes (0x03) are present within the payload.
     // --- ---
     let fields = [];
+    let currentBitOffset = 0; // Track bits for more complex future parsing (not fully used yet)
 
-    if (payloadData.length < 1) {
-       // console.warn(`NAL unit payload empty for NAL Type ${nalType}. Cannot extract fields.`);
-       return fields;
+    if (payloadData.length < 1 && ![36, 37].includes(nalType) /* EOS/EOB can be empty */) {
+       // console.warn(`NAL unit payload potentially too short for NAL Type ${nalType}.`);
+       // Allow processing to continue for empty NALs like EOS/EOB
+       // return fields; // Removed this early return to handle empty NALs gracefully
     }
 
     try {
         if (nalType === 32) { // VPS_NUT (Video Parameter Set - ITU-T H.265 Section 7.3.2.1)
-            // vps_video_parameter_set_id: u(4) -> Upper 4 bits of the first payload byte (byte 0)
-            fields.push({ name: "vps_video_parameter_set_id", value: (payloadData[0] >> 4) & 0x0F, bits: 4, type: 'u' });
-
-            // vps_base_layer_internal_flag: u(1) -> Bit 3 of byte 0
-            fields.push({ name: "vps_base_layer_internal_flag", value: (payloadData[0] >> 3) & 0x01, bits: 1, type: 'u' });
-
-            // vps_base_layer_available_flag: u(1) -> Bit 2 of byte 0
-            fields.push({ name: "vps_base_layer_available_flag", value: (payloadData[0] >> 2) & 0x01, bits: 1, type: 'u' });
-
-             // vps_max_layers_minus1: u(6) -> Bits 1-0 of byte 0, and bits 7-4 of byte 1
-             if (payloadData.length >= 2) {
-                const val_byte0 = (payloadData[0] & 0x03); // Lower 2 bits
-                const val_byte1 = (payloadData[1] >> 4) & 0x0F; // Upper 4 bits
-                const vps_max_layers_minus1 = (val_byte0 << 4) | val_byte1;
-                fields.push({ name: "vps_max_layers_minus1", value: vps_max_layers_minus1, bits: 6, type: 'u'});
-             } else {
-                fields.push({ name: "vps_max_layers_minus1", value: "...", bits: 6, type: 'u', error: 'Payload too short'}); // Indicate insufficient data
-             }
-
-            // vps_max_sub_layers_minus1: u(3) -> bits 3-1 of byte 1
-            if (payloadData.length >= 2) {
-                fields.push({ name: "vps_max_sub_layers_minus1", value: (payloadData[1] >> 1) & 0x07, bits: 3, type: 'u' });
-            } else {
-                fields.push({ name: "vps_max_sub_layers_minus1", value: "...", bits: 3, type: 'u', error: 'Payload too short'});
+             // Check sufficient length for the fixed initial fields
+            if (payloadData.length < 4) {
+                fields.push({ name: "ERROR", value: "Payload too short for initial VPS fields", type: 'error' });
+                return fields;
             }
 
-            // vps_temporal_id_nesting_flag: u(1) -> bit 0 of byte 1
-             if (payloadData.length >= 2) {
-                fields.push({ name: "vps_temporal_id_nesting_flag", value: payloadData[1] & 0x01, bits: 1, type: 'u' });
-             } else {
-                 fields.push({ name: "vps_temporal_id_nesting_flag", value: "...", bits: 1, type: 'u', error: 'Payload too short'});
-             }
+            // vps_video_parameter_set_id: u(4) -> Upper 4 bits of payload byte 0
+            const vps_video_parameter_set_id = (payloadData[0] >> 4) & 0x0F;
+            fields.push({ name: "vps_video_parameter_set_id", value: vps_video_parameter_set_id, bits: 4, type: 'u' });
+            currentBitOffset += 4;
 
-             // vps_reserved_0xffff_16bits: f(16) -> Bytes 2 and 3 (assuming byte alignment for simplicity)
-             if (payloadData.length >= 4) {
-                 fields.push({ name: "vps_reserved_0xffff_16bits", value: `0x${payloadData[2].toString(16).padStart(2, '0')}${payloadData[3].toString(16).padStart(2, '0')}`, bits: 16, type: 'f' }); // Simplified display
-             } else {
-                 fields.push({ name: "vps_reserved_0xffff_16bits", value: "...", bits: 16, type: 'f', error: 'Payload too short' });
+            // vps_base_layer_internal_flag: u(1) -> Bit 3 of payload byte 0
+            const vps_base_layer_internal_flag = (payloadData[0] >> 3) & 0x01;
+            fields.push({ name: "vps_base_layer_internal_flag", value: vps_base_layer_internal_flag, bits: 1, type: 'u' });
+            currentBitOffset += 1;
+
+            // vps_base_layer_available_flag: u(1) -> Bit 2 of payload byte 0
+            const vps_base_layer_available_flag = (payloadData[0] >> 2) & 0x01;
+            fields.push({ name: "vps_base_layer_available_flag", value: vps_base_layer_available_flag, bits: 1, type: 'u' });
+            currentBitOffset += 1;
+
+             // vps_max_layers_minus1: u(6) -> Bits 1-0 of byte 0, and bits 7-4 of byte 1
+             const val_byte0 = (payloadData[0] & 0x03); // Lower 2 bits
+             const val_byte1_hi = (payloadData[1] >> 4) & 0x0F; // Upper 4 bits
+             const vps_max_layers_minus1 = (val_byte0 << 4) | val_byte1_hi;
+             fields.push({ name: "vps_max_layers_minus1", value: vps_max_layers_minus1, bits: 6, type: 'u'});
+             currentBitOffset += 6; // Now at 12 bits total (1.5 bytes)
+
+            // vps_max_sub_layers_minus1: u(3) -> bits 3-1 of byte 1
+            const vps_max_sub_layers_minus1 = (payloadData[1] >> 1) & 0x07;
+            fields.push({ name: "vps_max_sub_layers_minus1", value: vps_max_sub_layers_minus1, bits: 3, type: 'u' });
+            currentBitOffset += 3; // Now at 15 bits total
+
+            // vps_temporal_id_nesting_flag: u(1) -> bit 0 of byte 1
+            const vps_temporal_id_nesting_flag = payloadData[1] & 0x01;
+            fields.push({ name: "vps_temporal_id_nesting_flag", value: vps_temporal_id_nesting_flag, bits: 1, type: 'u' });
+            currentBitOffset += 1; // Now at 16 bits total (2 bytes)
+
+             // vps_reserved_0xffff_16bits: f(16) -> Bytes 2 and 3
+             const vps_reserved_0xffff_16bits = (payloadData[2] << 8) | payloadData[3];
+             if (vps_reserved_0xffff_16bits !== 0xFFFF) {
+                 console.warn(`VPS reserved bits are not 0xFFFF (found 0x${vps_reserved_0xffff_16bits.toString(16)})`);
              }
+             fields.push({ name: "vps_reserved_0xffff_16bits", value: `0x${payloadData[2].toString(16).padStart(2, '0')}${payloadData[3].toString(16).padStart(2, '0')}`, bits: 16, type: 'f' }); // Simplified display
+             currentBitOffset += 16; // Now at 32 bits total (4 bytes)
 
              // profile_tier_level structure follows - complex parsing needed
-             fields.push({ name: "profile_tier_level", value: "...", type: 'struct' }); // Placeholder
+             // Requires parsing based on vps_max_sub_layers_minus1 value.
+             fields.push({ name: "profile_tier_level(...)", value: "...", type: 'struct', comment: `Requires parsing ${1 + vps_max_sub_layers_minus1} levels` }); // Placeholder
+
+             // Simplified: just point out that more data follows
+             if (payloadData.length > 4) {
+                 fields.push({ name: "vps_extension_etc", value: "...", type: 'data' });
+             }
 
 
         } else if (nalType === 33) { // SPS_NUT (Sequence Parameter Set - ITU-T H.265 Section 7.3.2.2)
+            if (payloadData.length < 1) { // Need at least one byte for first few fields
+               fields.push({ name: "ERROR", value: "Payload too short for initial SPS fields", type: 'error' });
+               return fields;
+            }
+            currentBitOffset = 0;
             // sps_video_parameter_set_id: u(4) -> Upper 4 bits of the first payload byte
             fields.push({ name: "sps_video_parameter_set_id", value: (payloadData[0] >> 4) & 0x0F, bits: 4, type: 'u' });
+            currentBitOffset += 4;
             // sps_max_sub_layers_minus1: u(3) -> Next 3 bits (bits 3-1 of byte 0)
-            fields.push({ name: "sps_max_sub_layers_minus1", value: (payloadData[0] >> 1) & 0x07, bits: 3, type: 'u' });
+            const sps_max_sub_layers_minus1 = (payloadData[0] >> 1) & 0x07;
+            fields.push({ name: "sps_max_sub_layers_minus1", value: sps_max_sub_layers_minus1, bits: 3, type: 'u' });
+            currentBitOffset += 3;
             // sps_temporal_id_nesting_flag: u(1) -> Next 1 bit (bit 0 of byte 0)
             fields.push({ name: "sps_temporal_id_nesting_flag", value: payloadData[0] & 0x01, bits: 1, type: 'u' });
+            currentBitOffset += 1; // Now at 8 bits (1 byte)
+
             // profile_tier_level(...) structure follows - complex parsing needed
-            fields.push({ name: "profile_tier_level", value: "...", type: 'struct' }); // Placeholder
-            // sps_seq_parameter_set_id: ue(v) -> Requires Exp-Golomb decoding, starts after profile_tier_level
-            fields.push({ name: "sps_seq_parameter_set_id", value: "...", type: 'ue'}); // Placeholder - requires proper parsing
-            // Add more SPS fields as placeholders if needed...
-            fields.push({ name: "chroma_format_idc", value: "...", type: 'ue'}); // Placeholder
+            // Requires parsing based on sps_max_sub_layers_minus1 value.
+             fields.push({ name: "profile_tier_level(...)", value: "...", type: 'struct', comment: `Requires parsing ${1 + sps_max_sub_layers_minus1} levels` }); // Placeholder
+
+            // The *next* fields require Exp-Golomb decoding and knowledge of profile_tier_level size
+            fields.push({ name: "sps_seq_parameter_set_id", value: "...", type: 'ue', comment: "Exp-Golomb encoded" }); // Placeholder - requires proper parsing
+            fields.push({ name: "chroma_format_idc", value: "...", type: 'ue', comment: "Exp-Golomb encoded" }); // Placeholder
             // ... other fields ...
+            if (payloadData.length > 1) { // Indicate more data exists
+                 fields.push({ name: "sps_remaining_data", value: "...", type: 'data' });
+            }
 
         } else if (nalType === 34) { // PPS_NUT (Picture Parameter Set - ITU-T H.265 Section 7.3.2.3)
-             // pps_pic_parameter_set_id: ue(v) -> Requires Exp-Golomb decoding
-             // pps_seq_parameter_set_id: ue(v) -> Requires Exp-Golomb decoding
-            fields.push({ name: "pps_pic_parameter_set_id", value: "...", type: 'ue'}); // Placeholder - requires proper parsing
-            fields.push({ name: "pps_seq_parameter_set_id", value: "...", type: 'ue'}); // Placeholder - requires proper parsing
+            // These first two fields require Exp-Golomb decoding from the start of the payload
+             fields.push({ name: "pps_pic_parameter_set_id", value: "...", type: 'ue', comment: "Exp-Golomb encoded" }); // Placeholder
+             fields.push({ name: "pps_seq_parameter_set_id", value: "...", type: 'ue', comment: "Exp-Golomb encoded" }); // Placeholder
             // Add more PPS fields as placeholders if needed...
-            fields.push({ name: "dependent_slice_segments_enabled_flag", value: "...", type: 'u', bits: 1}); // Placeholder
+            fields.push({ name: "dependent_slice_segments_enabled_flag", value: "...", type: 'u', bits: 1, comment: "Requires parsing previous fields"}); // Placeholder
+            fields.push({ name: "output_flag_present_flag", value: "...", type: 'u', bits: 1, comment: "Requires parsing previous fields"}); // Placeholder
              // ... other fields ...
+             if (payloadData.length > 0) { // Indicate more data exists
+                 fields.push({ name: "pps_remaining_data", value: "...", type: 'data' });
+             }
+        } else if (nalType === 35) { // AUD_NUT (Access Unit Delimiter - ITU-T H.265 Section 7.3.2.5)
+             if (payloadData.length >= 1) {
+                // pic_type: u(3) -> bits 7-5 of the first payload byte
+                const pic_type = (payloadData[0] >> 5) & 0x07;
+                fields.push({ name: "pic_type", value: pic_type, bits: 3, type: 'u' });
+                // TODO: Could add mapping for pic_type values (0: I, 1: P/I, 2: B/P/I, etc.)
+             } else {
+                 fields.push({ name: "ERROR", value: "Payload too short for AUD fields", type: 'error' });
+             }
+        } else if (nalType === 39 || nalType === 40) { // PREFIX_SEI_NUT or SUFFIX_SEI_NUT
+            // SEI messages are complex (list of messages, each with type/size/payload)
+            // This is a highly simplified placeholder
+             fields.push({ name: "SEI Message(s)", value: "...", type: 'complex', comment: "Requires full SEI parsing" });
+             if (payloadData.length > 0) {
+                  fields.push({ name: "sei_data_preview", value: `[${payloadData.slice(0, Math.min(8, payloadData.length)).join(', ')}...]`, type: 'data' });
+             }
         }
-        // Add extraction logic for other NAL types if needed (e.g., AUD, SEI)
+        // Add extraction logic for other NAL types if needed (e.g., FD_NUT)
+        // Note: EOS_NUT (36), EOB_NUT (37) have no syntax elements in their RBSP.
+        else if (nalType === 36 || nalType === 37) {
+             // No fields to extract, but presence is meaningful
+             // fields.push({ name: "Note", value: "No payload fields defined", type: 'info' });
+        }
+
     } catch (e) {
         console.error(`Error parsing NAL unit type ${nalType}:`, e);
         // Add a field indicating the error
@@ -249,15 +307,25 @@ function displayFields(nalName, nalType, fields) {
         fieldDiv.className = "field";
 
         // Use a unique identifier for each input based on NAL type and field name/index
-        const inputId = `nal-${nalType}-field-${field.name.replace(/\W/g, '_')}-${index}`; // Sanitize name for ID
+        // Sanitize name for ID: replace non-alphanumeric with underscore
+        const sanitizedFieldName = field.name.replace(/\W/g, '_');
+        const inputId = `nal-${nalType}-field-${sanitizedFieldName}-${index}`;
 
-        const isReadOnly = field.type === 'struct' || field.type === 'ue' || field.type === 'error' || field.name === "vps_reserved_0xffff_16bits" || field.error; // Make complex/placeholder/error fields read-only
+        // Determine if field should be read-only
+        const isReadOnly = field.type === 'struct' || field.type === 'ue' || field.type === 'error' ||
+                           field.type === 'data' || field.type === 'complex' || field.type === 'info' ||
+                           field.name === "vps_reserved_0xffff_16bits" || // Treat reserved as read-only
+                           field.error || // Explicit error case
+                           !['u', 'f'].includes(field.type) || // Only allow editing known simple types for now
+                           ![32, 33, 34, 35].includes(nalType); // Only allow editing in VPS/SPS/PPS/AUD for now
+
         const displayValue = field.error ? `${field.value} (${field.error})` : field.value;
+        const titleValue = field.comment ? ` title="${field.comment}"` : ''; // Add comment as tooltip
 
         fieldDiv.innerHTML = `
-            <label for="${inputId}">${nalName} - ${field.name}:</label>
-            <input type="text" id="${inputId}" data-nal-type="${nalType}" data-field-name="${field.name}" data-field-index="${index}" data-original-value="${field.value}" value="${displayValue}" ${isReadOnly ? 'readonly style="background-color:#eee;"' : ''}>
-            <span class="field-info">(${field.type}${field.bits ? `(${field.bits})` : ''})</span>`;
+            <label for="${inputId}"${titleValue}>${nalName} - ${field.name}:</label>
+            <input type="text" id="${inputId}" data-nal-type="${nalType}" data-field-name="${field.name}" data-field-index="${index}" data-original-value="${field.value}" data-field-type="${field.type}" data-field-bits="${field.bits || ''}" value="${displayValue}" ${isReadOnly ? 'readonly style="background-color:#eee;"' : ''}>
+            <span class="field-info">(${field.type}${field.bits ? `(${field.bits})` : ''})${field.comment ? ' ℹ️' : ''}</span>`;
         container.appendChild(fieldDiv);
     });
 }
@@ -303,6 +371,9 @@ function modifyStream() {
     }
 
     // Create a copy to modify - essential!
+    // IMPORTANT: We need to create a buffer large enough for potential *future* size changes,
+    // although this simple implementation DOES NOT currently handle size changes.
+    // For now, stick to the original size.
     const modifiedBuffer = new ArrayBuffer(originalData.length);
     const modifiedData = new Uint8Array(modifiedBuffer);
     modifiedData.set(originalData);
@@ -313,36 +384,41 @@ function modifyStream() {
     // 1. This modification process RE-FINDS NAL units. It assumes the *structure*
     //    (NAL unit locations and lengths) hasn't changed. This is only safe if
     //    the modifications *don't change the size* of any NAL unit (e.g., editing
-    //    fixed-length fields, but not Exp-Golomb fields).
+    //    fixed-length fields, but not Exp-Golomb fields). Modifying variable-length
+    //    fields WILL CORRUPT THE STREAM with this code.
     // 2. It uses the SAME simplified logic as `extractFields` for modification.
     //    This means it ONLY reliably modifies the specific bits targeted by that
-    //    logic (like vps_video_parameter_set_id, vps_max_layers_minus1, etc.). Modifying other
-    //    fields using this direct byte/bit manipulation without proper RBSP/bitstream
-    //    handling WILL LIKELY CORRUPT THE H.265 STREAM.
-    // 3. This does *not* handle emulation prevention bytes (0x000003). Inserting
-    //    or removing bytes would require shifting subsequent data and recalculating offsets.
-    // 4. Only integer modification is supported for simplicity.
+    //    logic (like vps_video_parameter_set_id, vps_max_sub_layers_minus1, etc.).
+    //    Modifying other fields using this direct byte/bit manipulation without proper
+    //    RBSP/bitstream handling WILL LIKELY CORRUPT THE H.265 STREAM.
+    // 3. This does *not* handle RBSP emulation prevention bytes (0x000003 -> 0x0000 and back).
+    //    Modifying data might require adding/removing these bytes, which changes NAL unit size.
+    // 4. Only integer modification is supported for simplicity for 'u' type fields.
     // --- ---
 
     let nalStartByteOffset = -1; // Offset in the *originalData* / *modifiedData* array where the NAL unit *payload* starts
     let nalUnitStartCodeLen = 0; // Length of the start code for the current NAL unit
     let zeroCount = 0;
+    let nalUnitIndex = 0; // Keep track of NAL units processed for matching UI elements
 
     for (let i = 0; i < originalData.length; i++) {
         if (zeroCount >= 2 && originalData[i] === 1) {
             const currentStartCodeLen = zeroCount === 2 ? 3 : 4;
-            const currentNalUnitStartOffset = i - currentStartCodeLen + 1; // Offset where the NAL unit *data* (including header) starts
+            // Offset where the NAL unit *data* (including header) starts in originalData
+            const currentNalUnitStartOffset = i - currentStartCodeLen + 1;
 
             if (nalStartByteOffset !== -1) {
                 // Process the *previous* NAL unit found
-                const nalHeaderOffset = nalStartByteOffset - nalUnitStartCodeLen; // Calculate start of NAL header
+                // Calculate start of NAL header in originalData
+                const nalHeaderOffset = nalStartByteOffset - nalUnitStartCodeLen;
                 const nalUnitLength = currentNalUnitStartOffset - nalHeaderOffset; // Length including header
 
-                if (applyModificationsToNal(modifiedData, nalHeaderOffset, nalUnitLength)) {
+                if (applyModificationsToNal(modifiedData, nalHeaderOffset, nalUnitLength, nalUnitIndex)) {
                     modified = true;
                 }
+                nalUnitIndex++;
             }
-            // Start of the new NAL unit (immediately after the start code)
+            // Start of the new NAL unit payload (immediately after the start code)
             nalStartByteOffset = i + 1;
             nalUnitStartCodeLen = currentStartCodeLen;
             zeroCount = 0;
@@ -357,7 +433,7 @@ function modifyStream() {
     if (nalStartByteOffset !== -1) {
          const nalHeaderOffset = nalStartByteOffset - nalUnitStartCodeLen;
          const lastNalUnitLength = originalData.length - nalHeaderOffset;
-         if (applyModificationsToNal(modifiedData, nalHeaderOffset, lastNalUnitLength)) {
+         if (applyModificationsToNal(modifiedData, nalHeaderOffset, lastNalUnitLength, nalUnitIndex)) {
              modified = true;
          }
     }
@@ -367,14 +443,14 @@ function modifyStream() {
 }
 
 // Helper function to apply modifications to a single NAL unit within the modifiedData buffer
-function applyModificationsToNal(modifiedData, nalUnitOffset, nalUnitLength) {
+function applyModificationsToNal(modifiedData, nalUnitOffset, nalUnitLength, nalUnitIndex) {
     if (nalUnitLength < 2) return false; // Need header
 
     let changed = false;
     const headerByte1 = modifiedData[nalUnitOffset];
     // Extract NAL type (bits 6-1 of the first header byte)
     const nalType = (headerByte1 & 0x7E) >> 1;
-    const payloadOffset = nalUnitOffset + 2; // Offset of payload within modifiedData
+    const payloadOffset = nalUnitOffset + 2; // Offset of payload within modifiedData buffer
     const payloadLength = nalUnitLength - 2;
 
     if (payloadLength < 0) {
@@ -382,112 +458,152 @@ function applyModificationsToNal(modifiedData, nalUnitOffset, nalUnitLength) {
          return false;
     }
 
-    // Find corresponding input fields for this NAL type
-    const inputs = document.querySelectorAll(`#fieldsContainer input[data-nal-type="${nalType}"]`);
+    // Find corresponding input fields for this NAL type *and* this specific NAL occurrence (index)
+    // We need a way to link the NAL unit being processed back to the specific set of input fields created for it.
+    // Let's assume the order of NAL units found matches the order the fields were added to the DOM.
+    // We'll select inputs based on NAL type and then filter by their original creation index (implicitly).
+    // This is fragile if the DOM structure changes or NAL units are added/removed dynamically.
+    // A better approach might involve storing NAL unit metadata alongside the fields.
+    // For now, we rely on the sequential processing matching the DOM order.
 
-    inputs.forEach(input => {
+    const potentialInputs = document.querySelectorAll(`#fieldsContainer input[data-nal-type="${nalType}"]`);
+    // This selects *all* inputs for a given NAL type. We need to associate them with *this* specific NAL.
+    // Let's assume `displayFields` adds fields for one NAL unit sequentially before moving to the next.
+    // We can estimate which inputs belong to this NAL unit based on the `nalUnitIndex`.
+    // This requires calculating how many fields each NAL type *typically* generates.
+    // --> THIS IS TOO COMPLEX AND ERROR PRONE FOR THIS SIMPLE SCRIPT.
+    // --> REVERTING to simpler approach: Apply change if *any* input for this NAL type has changed.
+    // This means if you have multiple VPS NALs, changing a field in the UI will attempt
+    // to apply that change to *ALL* VPS NALs in the stream that have that field.
+
+    potentialInputs.forEach(input => {
         const fieldName = input.dataset.fieldName;
         const originalValueStr = input.dataset.originalValue; // Value originally extracted
         const currentValueStr = input.value; // Current value in the input box
+        const fieldType = input.dataset.fieldType;
+        const fieldBits = parseInt(input.dataset.fieldBits, 10) || 0;
 
         // Only proceed if the value has actually changed from the original display AND is not read-only/placeholder
-        if (currentValueStr === originalValueStr || input.readOnly || originalValueStr === "...") {
+        if (currentValueStr === originalValueStr || input.readOnly || originalValueStr === "..." || !fieldName) {
             // console.log(`Skipping ${fieldName} - no change or read-only.`);
             return;
         }
 
-        // Attempt to parse the new value as an integer (basic validation)
-        const newValue = parseInt(currentValueStr, 10);
-        if (isNaN(newValue)) {
-            console.warn(`Invalid input "${currentValueStr}" for ${fieldName} (NAL Type ${nalType}). Skipping modification.`);
-            input.value = originalValueStr; // Revert UI to original value
-            return;
+        // Attempt to parse the new value based on expected type (currently just integer)
+        let newValue;
+        if (fieldType === 'u' || fieldType === 'f') { // Treat fixed as potentially numeric for bitwise ops
+             newValue = parseInt(currentValueStr, 10);
+             if (isNaN(newValue)) {
+                 console.warn(`Invalid integer input "${currentValueStr}" for ${fieldName} (NAL Type ${nalType}). Skipping modification.`);
+                 input.value = originalValueStr; // Revert UI to original value
+                 return;
+             }
+        } else {
+             console.warn(`Modification for field type '${fieldType}' not supported (${fieldName}). Skipping.`);
+             input.value = originalValueStr; // Revert UI
+             return;
         }
+
 
         // --- Simplified Modification Logic (Matches extraction limitations) ---
         // --- WARNING: HIGH RISK OF CORRUPTION IF MODIFYING INCORRECTLY ---
+        // --- WARNING: DOES NOT HANDLE RBSP ANTI-EMULATION ---
+        // --- WARNING: Modifying one field might affect others if bits overlap or bytes are shared ---
         try {
             let fieldModified = false;
+            // Check payload length before accessing bytes
+            if (payloadLength < 1) {
+                 console.warn(`Payload too short (${payloadLength} bytes) to modify field ${fieldName} in NAL ${nalType}. Skipping.`);
+                 input.value = originalValueStr; // Revert UI
+                 return;
+            }
+
             // --- VPS Modification Logic (nalType 32) ---
             if (nalType === 32) {
-                if (fieldName === "vps_video_parameter_set_id") {
-                    if (payloadLength >= 1 && newValue >= 0 && newValue <= 15) { // u(4)
-                        // Modify the upper 4 bits of the first payload byte
+                // Calculate byte and bit offsets based *only* on the simplified field list order
+                if (fieldName === "vps_video_parameter_set_id") { // u(4) @ byte 0, bits 7-4
+                    if (newValue >= 0 && newValue <= 15) {
                         modifiedData[payloadOffset] = (newValue << 4) | (modifiedData[payloadOffset] & 0x0F);
                         fieldModified = true;
-                    } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-15) or payload too short (${payloadLength}).`); }
-                } else if (fieldName === "vps_base_layer_internal_flag") {
-                    if (payloadLength >= 1 && (newValue === 0 || newValue === 1)) { // u(1)
-                        // Modify bit 3 of the first payload byte
+                    } else { console.warn(`Invalid value ${newValue} for ${fieldName} (0-15).`); }
+                } else if (fieldName === "vps_base_layer_internal_flag") { // u(1) @ byte 0, bit 3
+                    if (newValue === 0 || newValue === 1) {
                         modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~(1 << 3)) | ((newValue & 0x01) << 3);
                         fieldModified = true;
-                    } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-1) or payload too short (${payloadLength}).`); }
-                } else if (fieldName === "vps_base_layer_available_flag") {
-                     if (payloadLength >= 1 && (newValue === 0 || newValue === 1)) { // u(1)
-                         // Modify bit 2 of the first payload byte
+                    } else { console.warn(`Invalid value ${newValue} for ${fieldName} (0-1).`); }
+                } else if (fieldName === "vps_base_layer_available_flag") { // u(1) @ byte 0, bit 2
+                     if (newValue === 0 || newValue === 1) {
                          modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~(1 << 2)) | ((newValue & 0x01) << 2);
                          fieldModified = true;
-                     } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-1) or payload too short (${payloadLength}).`); }
-                } else if (fieldName === "vps_max_layers_minus1") {
-                     if (payloadLength >= 2 && newValue >= 0 && newValue <= 63) { // u(6) spans byte 0 and 1
-                         // Bits 1-0 of byte 0, Bits 7-4 of byte 1
-                         const val_byte0_bits = (newValue >> 4) & 0x03; // Upper 2 bits of value go to lower 2 bits of byte 0
-                         const val_byte1_bits = (newValue & 0x0F) << 4; // Lower 4 bits of value go to upper 4 bits of byte 1
-
-                         // Modify byte 0 (payloadOffset): Clear bits 1-0, set new bits
-                         modifiedData[payloadOffset] = (modifiedData[payloadOffset] & 0xFC) | val_byte0_bits;
-                         // Modify byte 1 (payloadOffset + 1): Clear bits 7-4, set new bits
+                     } else { console.warn(`Invalid value ${newValue} for ${fieldName} (0-1).`); }
+                } else if (fieldName === "vps_max_layers_minus1") { // u(6) @ byte 0 bits 1-0, byte 1 bits 7-4
+                     if (payloadLength >= 2 && newValue >= 0 && newValue <= 63) {
+                         const val_byte0_bits = (newValue >> 4) & 0x03; // Upper 2 bits of value -> lower 2 bits of byte 0
+                         const val_byte1_bits = (newValue & 0x0F) << 4; // Lower 4 bits of value -> upper 4 bits of byte 1
+                         modifiedData[payloadOffset]     = (modifiedData[payloadOffset] & 0xFC) | val_byte0_bits;
                          modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & 0x0F) | val_byte1_bits;
                          fieldModified = true;
-                     } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-63) or payload too short (${payloadLength}).`); }
-                } else if (fieldName === "vps_max_sub_layers_minus1") {
-                    if (payloadLength >= 2 && newValue >= 0 && newValue <= 7) { // u(3) in byte 1
-                        // Modify bits 3-1 of the second payload byte (at payloadOffset + 1)
-                        modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & 0xF1) | ((newValue & 0x07) << 1);
+                     } else { console.warn(`Invalid value ${newValue} (0-63) or payload too short (${payloadLength}<2) for ${fieldName}.`); }
+                } else if (fieldName === "vps_max_sub_layers_minus1") { // u(3) @ byte 1, bits 3-1
+                    if (payloadLength >= 2 && newValue >= 0 && newValue <= 7) {
+                        modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & 0xF1) | ((newValue & 0x07) << 1); // Mask: 1111 0001
                         fieldModified = true;
-                    } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-7) or payload too short (${payloadLength}).`); }
-                } else if (fieldName === "vps_temporal_id_nesting_flag") {
-                    if (payloadLength >= 2 && (newValue === 0 || newValue === 1)) { // u(1) in byte 1
-                        // Modify bit 0 of the second payload byte (at payloadOffset + 1)
-                        modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & 0xFE) | (newValue & 0x01);
+                    } else { console.warn(`Invalid value ${newValue} (0-7) or payload too short (${payloadLength}<2) for ${fieldName}.`); }
+                } else if (fieldName === "vps_temporal_id_nesting_flag") { // u(1) @ byte 1, bit 0
+                    if (payloadLength >= 2 && (newValue === 0 || newValue === 1)) {
+                        modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & 0xFE) | (newValue & 0x01); // Mask: 1111 1110
                         fieldModified = true;
-                    } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-1) or payload too short (${payloadLength}).`); }
+                    } else { console.warn(`Invalid value ${newValue} (0-1) or payload too short (${payloadLength}<2) for ${fieldName}.`); }
                 }
+                // Note: vps_reserved_0xffff_16bits is read-only
             }
             // --- SPS Modification Logic (nalType 33) ---
             else if (nalType === 33) {
-                if (fieldName === "sps_video_parameter_set_id") {
-                    if (payloadLength >= 1 && newValue >= 0 && newValue <= 15) { // u(4)
-                        // Modify the upper 4 bits of the first payload byte
+                 if (fieldName === "sps_video_parameter_set_id") { // u(4) @ byte 0, bits 7-4
+                    if (newValue >= 0 && newValue <= 15) {
                         modifiedData[payloadOffset] = (newValue << 4) | (modifiedData[payloadOffset] & 0x0F);
                         fieldModified = true;
-                    } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-15) or payload too short (${payloadLength}).`); }
-                } else if (fieldName === "sps_max_sub_layers_minus1") {
-                     if (payloadLength >= 1 && newValue >= 0 && newValue <= 7) { // u(3)
-                         // Modify bits 3-1 of the first payload byte
-                         modifiedData[payloadOffset] = (modifiedData[payloadOffset] & 0xF1) | ((newValue & 0x07) << 1);
+                    } else { console.warn(`Invalid value ${newValue} for ${fieldName} (0-15).`); }
+                } else if (fieldName === "sps_max_sub_layers_minus1") { // u(3) @ byte 0, bits 3-1
+                     if (newValue >= 0 && newValue <= 7) {
+                         modifiedData[payloadOffset] = (modifiedData[payloadOffset] & 0xF1) | ((newValue & 0x07) << 1); // Mask: 1111 0001
                          fieldModified = true;
-                     } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-7) or payload too short (${payloadLength}).`); }
-                } else if (fieldName === "sps_temporal_id_nesting_flag") {
-                    if (payloadLength >= 1 && (newValue === 0 || newValue === 1)) { // u(1)
-                        // Modify bit 0 of the first payload byte
-                        modifiedData[payloadOffset] = (modifiedData[payloadOffset] & 0xFE) | (newValue & 0x01);
+                     } else { console.warn(`Invalid value ${newValue} for ${fieldName} (0-7).`); }
+                } else if (fieldName === "sps_temporal_id_nesting_flag") { // u(1) @ byte 0, bit 0
+                    if (newValue === 0 || newValue === 1) {
+                        modifiedData[payloadOffset] = (modifiedData[payloadOffset] & 0xFE) | (newValue & 0x01); // Mask: 1111 1110
                         fieldModified = true;
-                    } else { console.warn(`Cannot modify ${fieldName}: Invalid value ${newValue} (0-1) or payload too short (${payloadLength}).`); }
+                    } else { console.warn(`Invalid value ${newValue} for ${fieldName} (0-1).`); }
                 }
+                 // Other SPS fields are complex (profile_tier_level, ue(v)) and not modifiable here
             }
             // --- PPS Modification Logic (nalType 34) ---
-            // (No simple fields implemented here yet for modification)
+            // (No simple fields implemented here yet for modification - all start with ue(v))
+
+            // --- AUD Modification Logic (nalType 35) ---
+            else if (nalType === 35) {
+                if (fieldName === "pic_type") { // u(3) @ byte 0, bits 7-5
+                    if (newValue >= 0 && newValue <= 7) {
+                        modifiedData[payloadOffset] = (newValue << 5) | (modifiedData[payloadOffset] & 0x1F); // Mask: 0001 1111
+                        fieldModified = true;
+                    } else { console.warn(`Invalid value ${newValue} for ${fieldName} (0-7).`); }
+                }
+            }
 
             // --- Update state if modification occurred ---
             if (fieldModified) {
-                console.log(`Modified NAL ${nalType} field "${fieldName}" at payload offset ${payloadOffset} (approx) to ${newValue}`);
-                input.dataset.originalValue = currentValueStr; // Update original value tracking AFTER successful modification
+                console.log(`Modified NAL ${nalType} (offset ${nalUnitOffset}) field "${fieldName}" to ${newValue}`);
+                // Update the input's original value dataset to prevent re-applying the same change
+                // and to allow further edits from the new value.
+                input.dataset.originalValue = currentValueStr;
                 changed = true; // Mark that *some* change happened in this NAL unit
             } else if (!input.readOnly && originalValueStr !== "...") {
-                // If modification wasn't handled or failed validation, revert the input field
-                console.warn(`Modification not implemented or failed for NAL ${nalType}, field "${fieldName}". Reverting input.`);
-                input.value = originalValueStr;
+                // If modification wasn't handled (e.g., field not in the logic above) or failed validation, revert the input field
+                 if (!fieldName.includes("ERROR") && !fieldName.includes("Note") && !fieldName.includes("...") && fieldType !== 'struct' && fieldType !== 'ue') {
+                     // Only warn/revert for fields we *might* have expected to modify
+                     console.warn(`Modification not implemented or failed for NAL ${nalType}, field "${fieldName}". Reverting input.`);
+                     input.value = originalValueStr;
+                 }
             }
 
         } catch (e) {
