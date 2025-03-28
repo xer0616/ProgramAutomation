@@ -1,5 +1,5 @@
 
-const version = 16
+const version = 17
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -176,7 +176,7 @@ function extractFields(nalType, payloadData) {
     // WARNING: This parser is extremely basic. It only attempts to read a few
     // fixed-bit-length fields (u(n), f(n)) at the very START of specific NAL unit payloads.
     // It CANNOT parse:
-    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265 (e.g., pic_width/height, conf_win_*_offset).
+    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265 (e.g., pic_width/height, conf_win_*_offset, bit_depth_luma_minus8).
     //   - Fields located after variable-length fields (like profile_tier_level, or anything after ue(v)/se(v)).
     //   - Conditional fields based on previously parsed values (like conf_win_left_offset depending on conformance_window_flag).
     //   - Fields requiring removal of emulation prevention bytes (0x000003 -> 0x0000).
@@ -276,8 +276,13 @@ function extractFields(nalType, payloadData) {
              fields.push({ name: "conf_win_top_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
              fields.push({ name: "conf_win_bottom_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
 
+             // --- bit_depth_luma_minus8: ue(v) ---
+             // Comes *after* conformance window info (if present), which follows ue(v) fields.
+             // Cannot parse without decoding previous variable-length and ue(v) fields.
+             fields.push({ name: "bit_depth_luma_minus8", value: "Requires ue(v) parsing AFTER conformance window fields" });
+
             // --- Many more fields follow, often ue(v), se(v) or conditional ---
-            // Examples: bit_depth_luma_minus8 ue(v), bit_depth_chroma_minus8 ue(v), log2_max_pic_order_cnt_lsb_minus4 ue(v),
+            // Examples: bit_depth_chroma_minus8 ue(v), log2_max_pic_order_cnt_lsb_minus4 ue(v),
             // sps_sub_layer_ordering_info_present_flag u(1), ... short_term_ref_pic_sets, ...
             // vui_parameters_present_flag u(1)...
             fields.push({ name: "...", value: "(Many more fields require complex parsing: ue(v), se(v), conditionals, loops, VUI, etc.)" });
@@ -351,6 +356,7 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'conf_win_right_offset' && // Explicitly disable the conformance window offsets
                 field.name !== 'conf_win_top_offset' && // Explicitly disable the conformance window offsets
                 field.name !== 'conf_win_bottom_offset' && // Explicitly disable the conformance window offsets
+                field.name !== 'bit_depth_luma_minus8' &&   // Explicitly disable bit depth (requires ue(v))
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
@@ -401,7 +407,7 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_left_offset, conf_win_right_offset, conf_win_top_offset, conf_win_bottom_offset), fields after variable-length structures (like profile_tier_level), conditional fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_left_offset, conf_win_right_offset, conf_win_top_offset, conf_win_bottom_offset, bit_depth_luma_minus8), fields after variable-length structures (like profile_tier_level), conditional fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -551,7 +557,8 @@ function modifyStream() {
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
 //          IT CANNOT MODIFY Exp-Golomb fields like pic_width/height_in_luma_samples,
-//          conformance_window_flag, or conf_win_left_offset/conf_win_right_offset/conf_win_top_offset/conf_win_bottom_offset (and related) or fields after them.
+//          conformance_window_flag, conf_win_left_offset/conf_win_right_offset/conf_win_top_offset/conf_win_bottom_offset,
+//          bit_depth_luma_minus8, or fields after them.
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -650,7 +657,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  }
                  // IMPORTANT: Cannot modify any fields after these initial ones (e.g., profile_tier_level,
                  // sps_seq_parameter_set_id, chroma_format_idc, pic_width_in_luma_samples, pic_height_in_luma_samples,
-                 // conformance_window_flag, conf_win_left_offset, conf_win_right_offset, conf_win_top_offset, conf_win_bottom_offset, etc.) because their offsets are unknown
+                 // conformance_window_flag, conf_win_left_offset, conf_win_right_offset, conf_win_top_offset, conf_win_bottom_offset,
+                 // bit_depth_luma_minus8, etc.) because their offsets are unknown
                  // and/or they use Exp-Golomb encoding.
                  // The input fields for these should be disabled by displayFields.
                  else {
@@ -660,8 +668,9 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'conformance_window_flag' ||
                           fieldName === 'conf_win_left_offset' ||
                           fieldName === 'conf_win_right_offset' ||
-                          fieldName === 'conf_win_top_offset' || // Explicit check
-                          fieldName === 'conf_win_bottom_offset' || // Explicit check
+                          fieldName === 'conf_win_top_offset' ||
+                          fieldName === 'conf_win_bottom_offset' ||
+                          fieldName === 'bit_depth_luma_minus8' || // Explicit check
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
