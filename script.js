@@ -1,5 +1,5 @@
 
-const version = 20
+const version = 21
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -303,7 +303,7 @@ function extractFields(nalType, payloadData) {
             // Cannot parse without decoding previous ue(v) fields, handling the flag, and handling the loop structure.
             fields.push({ name: "sps_max_dec_pic_buffering_minus1[i]", value: "Requires ue(v) parsing within loop AFTER sps_sub_layer_ordering_info_present_flag" });
 
-            // --- sps_max_num_reorder_pics[i]: ue(v) --- [Position approximated, relative to above]
+            // --- sps_max_num_reorder_pics[i]: ue(v) --- [ADDED HERE]
             // Appears in the same loop as sps_max_dec_pic_buffering_minus1.
             fields.push({ name: "sps_max_num_reorder_pics[i]", value: "Requires ue(v) parsing within loop AFTER sps_max_dec_pic_buffering_minus1" });
 
@@ -390,8 +390,8 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'bit_depth_chroma_minus8' && // Explicitly disable chroma bit depth (requires ue(v))
                 field.name !== 'log2_max_pic_order_cnt_lsb_minus4' && // Explicitly disable log2_max_poc_lsb (requires ue(v))
                 field.name !== 'sps_sub_layer_ordering_info_present_flag' && // Explicitly disable (after ue(v))
-                field.name !== 'sps_max_dec_pic_buffering_minus1[i]' && // Explicitly disable (ue(v) in loop) [ADDED]
-                field.name !== 'sps_max_num_reorder_pics[i]' && // Explicitly disable (ue(v) in loop)
+                field.name !== 'sps_max_dec_pic_buffering_minus1[i]' && // Explicitly disable (ue(v) in loop) [ADDED Check]
+                field.name !== 'sps_max_num_reorder_pics[i]' && // Explicitly disable (ue(v) in loop) [ADDED]
                 field.name !== 'sps_max_latency_increase_plus1[i]' && // Explicitly disable (ue(v) in loop)
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
@@ -443,7 +443,7 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4, sps_max_dec_pic_buffering_minus1), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4, sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -594,7 +594,7 @@ function modifyStream() {
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
 //          IT CANNOT MODIFY Exp-Golomb fields like pic_width/height_in_luma_samples,
 //          conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4,
-//          sps_max_dec_pic_buffering_minus1, or fields after them.
+//          sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics, or fields after them.
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -710,8 +710,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'bit_depth_chroma_minus8' || // Explicit check
                           fieldName === 'log2_max_pic_order_cnt_lsb_minus4' || // Explicit check
                           fieldName === 'sps_sub_layer_ordering_info_present_flag' || // Explicit check
-                          fieldName === 'sps_max_dec_pic_buffering_minus1[i]' || // Explicit check [ADDED]
-                          fieldName === 'sps_max_num_reorder_pics[i]' || // Explicit check
+                          fieldName === 'sps_max_dec_pic_buffering_minus1[i]' || // Explicit check [ADDED Check]
+                          fieldName === 'sps_max_num_reorder_pics[i]' || // Explicit check [ADDED]
                           fieldName === 'sps_max_latency_increase_plus1[i]' || // Explicit check
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
