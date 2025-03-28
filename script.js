@@ -1,5 +1,5 @@
 
-const version = 38
+const version = 39
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -327,14 +327,17 @@ function extractFields(nalUnitType, payloadData) {
             fields.push({ name: "pcm_sample_bit_depth_chroma_minus1", value: "Requires parsing pcm_enabled_flag AND ue(v) parsing" });
             fields.push({ name: "log2_min_pcm_luma_coding_block_size_minus3", value: "Requires parsing pcm_enabled_flag AND ue(v) parsing" });
             fields.push({ name: "log2_diff_max_min_pcm_luma_coding_block_size", value: "Requires parsing pcm_enabled_flag AND ue(v) parsing" });
-            // [ADDED] Added pcm_loop_filter_disabled_flag based on spec
             fields.push({ name: "pcm_loop_filter_disabled_flag", value: "Requires parsing pcm_enabled_flag" });
 
+            // --- num_short_term_ref_pic_sets: ue(v) --- ADDED
+            // Comes AFTER conditional PCM fields
+            fields.push({ name: "num_short_term_ref_pic_sets", value: "Requires ue(v) parsing AFTER PCM fields" });
+
             // --- Many more fields follow ---
-            // Examples: num_short_term_ref_pic_sets ue(v), long_term_ref_pics_present_flag u(1), ...
+            // Examples: short_term_ref_pic_set() loop, long_term_ref_pics_present_flag u(1), ...
             // sps_temporal_mvp_enabled_flag u(1), sps_strong_intra_smoothing_enabled_flag u(1), ...
             // vui_parameters_present_flag u(1)...
-            fields.push({ name: "...", value: "(Many more fields require complex parsing: ue(v), se(v), conditionals, loops, VUI, etc.)" });
+            fields.push({ name: "...", value: "(Many more fields require complex parsing: loops (ST ref pic sets), conditionals, ue(v), se(v), VUI, etc.)" });
 
         } else if (nalUnitType === 34) { // PPS_NUT (Picture Parameter Set, Section 7.3.2.3)
             // pps_pic_parameter_set_id: ue(v)
@@ -383,7 +386,7 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
 
             // Determine if the field *might* be editable based on its name and current value
             // This is a heuristic - it doesn't guarantee the modification will work correctly.
-            // [MODIFIED] Added pcm_loop_filter_disabled_flag to the disable list
+            // [MODIFIED] Added num_short_term_ref_pic_sets to the disable list
             const isPotentiallyEditable =
                 // Exclude placeholder/info fields explicitly
                 !field.name.endsWith("...") &&
@@ -422,7 +425,8 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'pcm_sample_bit_depth_chroma_minus1' && // Explicitly disable (conditional ue(v))
                 field.name !== 'log2_min_pcm_luma_coding_block_size_minus3' && // Explicitly disable (conditional ue(v))
                 field.name !== 'log2_diff_max_min_pcm_luma_coding_block_size' && // Explicitly disable (conditional ue(v))
-                field.name !== 'pcm_loop_filter_disabled_flag' && // Explicitly disable (conditional u(1)) - ADDED
+                field.name !== 'pcm_loop_filter_disabled_flag' && // Explicitly disable (conditional u(1))
+                field.name !== 'num_short_term_ref_pic_sets' && // Explicitly disable (ue(v)) - ADDED
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
@@ -473,8 +477,8 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    // [MODIFIED] Updated warning to include pcm_loop_filter_disabled_flag
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag, sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1, pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3, log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag, etc.), fields after variable-length structures (like profile_tier_level or scaling_list_data), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    // [MODIFIED] Updated warning to include num_short_term_ref_pic_sets
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag, sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1, pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3, log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag, num_short_term_ref_pic_sets, etc.), fields after variable-length structures (like profile_tier_level or scaling_list_data), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -623,8 +627,8 @@ function modifyStream() {
 // Helper function to apply modifications to a specific NAL unit's payload data
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
-//          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ..., max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag, sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1, pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3, log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag).
-// [MODIFIED] Added pcm_loop_filter_disabled_flag to the check
+//          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ..., max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag, sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1, pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3, log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag, num_short_term_ref_pic_sets).
+// [MODIFIED] Added num_short_term_ref_pic_sets to the check
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -726,12 +730,15 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  // log2_diff_max_min_luma_coding_block_size, log2_min_transform_block_size_minus2,
                  // log2_diff_max_min_transform_block_size, max_transform_hierarchy_depth_inter,
                  // max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag,
-                 // sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1, etc.)
+                 // sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1,
+                 // pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3,
+                 // log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag,
+                 // num_short_term_ref_pic_sets, etc.)
                  // because their offsets are unknown and/or they use Exp-Golomb encoding or are in loops.
                  // The input fields for these should be disabled by displayFields.
                  else {
                       // Throw an error if modification is attempted for known complex/unsupported fields
-                      // [MODIFIED] Added pcm_loop_filter_disabled_flag to the check
+                      // [MODIFIED] Added num_short_term_ref_pic_sets to the check
                       if (fieldName === 'pic_width_in_luma_samples' ||
                           fieldName === 'pic_height_in_luma_samples' ||
                           fieldName === 'conformance_window_flag' ||
@@ -760,7 +767,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'pcm_sample_bit_depth_chroma_minus1' ||
                           fieldName === 'log2_min_pcm_luma_coding_block_size_minus3' ||
                           fieldName === 'log2_diff_max_min_pcm_luma_coding_block_size' ||
-                          fieldName === 'pcm_loop_filter_disabled_flag' || // ADDED
+                          fieldName === 'pcm_loop_filter_disabled_flag' ||
+                          fieldName === 'num_short_term_ref_pic_sets' || // ADDED
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
