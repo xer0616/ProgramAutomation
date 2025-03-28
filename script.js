@@ -1,5 +1,5 @@
 
-const version = 8
+const version = 9
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -202,8 +202,13 @@ function extractFields(nalType, payloadData) {
             // Standard values are 0 (monochrome), 1 (4:2:0), 2 (4:2:2), 3 (4:4:4).
             fields.push({ name: "chroma_format_idc", value: "Requires ue(v) parsing AFTER sps_seq_parameter_set_id" });
 
+            // --- separate_colour_plane_flag: u(1) ---
+            // This field is CONDITIONAL: `if( chroma_format_idc == 3 )`
+            // It appears *after* chroma_format_idc.
+            // Cannot parse without decoding previous ue(v) fields and checking the condition.
+            fields.push({ name: "separate_colour_plane_flag", value: "Requires parsing chroma_format_idc==3 (after ue(v) fields)" });
 
-            // --- Many more fields follow, often ue(v) or conditional ---
+            // --- Many more fields follow, often ue(v), se(v) or conditional ---
             fields.push({ name: "...", value: "(More fields require complex parsing)" });
 
         } else if (nalType === 34) { // PPS_NUT (Section 7.3.2.3)
@@ -480,10 +485,11 @@ function applyModificationsToNal(modifiedData, payloadOffset, nalType, inputsToA
                       modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0x01) | (newValue & 0x01); // Bit 7
                  }
                  // IMPORTANT: Cannot modify sps_seq_parameter_set_id, chroma_format_idc,
-                 // or anything after profile_tier_level() here as they require Exp-Golomb parsing
-                 // and knowledge of the exact length of preceding variable-length fields.
-                 else if (fieldName === 'chroma_format_idc') {
-                      // This field cannot be modified by this simple tool.
+                 // separate_colour_plane_flag, or anything after profile_tier_level() here
+                 // as they require Exp-Golomb parsing and knowledge of the exact length
+                 // of preceding variable-length fields.
+                 else if (fieldName === 'chroma_format_idc' || fieldName === 'separate_colour_plane_flag') {
+                      // These fields cannot be modified by this simple tool.
                       // The check `!field.name.includes("Requires ")` in displayFields already prevents this.
                       // If it were somehow enabled, log a warning.
                       console.warn(`Attempted to modify non-editable field: ${fieldName}`);
