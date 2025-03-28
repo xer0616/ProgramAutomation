@@ -1,5 +1,5 @@
 
-const version = 7
+const version = 8
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -196,6 +196,13 @@ function extractFields(nalType, payloadData) {
             // Cannot parse without decoding profile_tier_level() and ue(v).
             fields.push({ name: "sps_seq_parameter_set_id", value: "Requires ue(v) parsing AFTER profile_tier_level()" });
 
+            // --- chroma_format_idc: ue(v) ---
+            // This field comes *after* sps_seq_parameter_set_id.
+            // Cannot parse without decoding profile_tier_level(), sps_seq_parameter_set_id and ue(v).
+            // Standard values are 0 (monochrome), 1 (4:2:0), 2 (4:2:2), 3 (4:4:4).
+            fields.push({ name: "chroma_format_idc", value: "Requires ue(v) parsing AFTER sps_seq_parameter_set_id" });
+
+
             // --- Many more fields follow, often ue(v) or conditional ---
             fields.push({ name: "...", value: "(More fields require complex parsing)" });
 
@@ -239,11 +246,14 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
         fieldDiv.className = "field";
         // Use a unique ID including NAL index and field name/index
         const inputId = `nal-${nalIndex}-field-${field.name.replace(/[^a-zA-Z0-9_]/g, '_')}-${fieldIndex}`;
+        // Determine if the field should be editable based on its name and content
         const isEditable = !field.name.endsWith("...") &&
-                           !field.name.includes("Error") &&
-                           !field.name.includes("skipped") &&
+                           !field.name.includes(" Error") && // Catch "Payload Error", "Parsing Error"
+                           !field.name.includes("(Structure skipped") &&
                            !field.name.includes("Requires ") && // Catches "Requires Exp-Golomb", "Requires ue(v)..." etc.
-                           !field.name.includes("Payload too short");
+                           !field.name.startsWith("reserved"); // Generally don't edit reserved fields
+                           // Add more specific non-editable names if needed
+
         const disabledAttr = isEditable ? "" : "disabled";
         const titleAttr = isEditable ? "" : `title="Parsing/Editing not supported for this field type/value in this simple tool"`;
 
@@ -469,7 +479,15 @@ function applyModificationsToNal(modifiedData, payloadOffset, nalType, inputsToA
                      if (isNaN(newValue) || newValue < 0 || newValue > 1) throw new Error("Invalid SPS temporal nesting flag (0-1)");
                       modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0x01) | (newValue & 0x01); // Bit 7
                  }
-                 // IMPORTANT: Cannot modify sps_seq_parameter_set_id or anything after profile_tier_level() here.
+                 // IMPORTANT: Cannot modify sps_seq_parameter_set_id, chroma_format_idc,
+                 // or anything after profile_tier_level() here as they require Exp-Golomb parsing
+                 // and knowledge of the exact length of preceding variable-length fields.
+                 else if (fieldName === 'chroma_format_idc') {
+                      // This field cannot be modified by this simple tool.
+                      // The check `!field.name.includes("Requires ")` in displayFields already prevents this.
+                      // If it were somehow enabled, log a warning.
+                      console.warn(`Attempted to modify non-editable field: ${fieldName}`);
+                 }
              }
              // --- AUD Fields (Type 35) ---
              else if (nalType === 35) {
