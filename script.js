@@ -1,5 +1,5 @@
 
-const version = 10
+const version = 11
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -253,12 +253,13 @@ function extractFields(nalType, payloadData) {
             fields.push({ name: "separate_colour_plane_flag", value: "Requires parsing chroma_format_idc (after ue(v) fields) and checking condition" });
 
             // --- pic_width_in_luma_samples: ue(v) ---
-            // THIS IS THE REQUESTED FIELD. It comes *after* chroma_format_idc and potential separate_colour_plane_flag.
+            // Comes *after* chroma_format_idc and potential separate_colour_plane_flag.
             // Cannot parse without decoding previous variable-length fields.
             fields.push({ name: "pic_width_in_luma_samples", value: "Requires ue(v) parsing AFTER chroma_format_idc/separate_colour_plane_flag" });
 
             // --- pic_height_in_luma_samples: ue(v) ---
-            // Comes after pic_width_in_luma_samples. Cannot parse.
+            // **THIS IS THE REQUESTED FIELD.** Comes *after* pic_width_in_luma_samples.
+            // Cannot parse without decoding previous variable-length fields.
             fields.push({ name: "pic_height_in_luma_samples", value: "Requires ue(v) parsing AFTER pic_width_in_luma_samples" });
 
              // --- conformance_window_flag: u(1) ---
@@ -332,8 +333,8 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'sps_seq_parameter_set_id' &&
                 field.name !== 'chroma_format_idc' &&
                 field.name !== 'separate_colour_plane_flag' &&
-                field.name !== 'pic_width_in_luma_samples' && // Explicitly disable the requested field
-                field.name !== 'pic_height_in_luma_samples' &&
+                field.name !== 'pic_width_in_luma_samples' && // Explicitly disable fields requiring ue(v) or complex offsets
+                field.name !== 'pic_height_in_luma_samples' && // Explicitly disable the requested field too
                 field.name !== 'conformance_window_flag' &&
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
@@ -385,7 +386,7 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields, fields after variable-length structures (like profile_tier_level), conditional fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples), fields after variable-length structures (like profile_tier_level), conditional fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -527,6 +528,7 @@ function modifyStream() {
 // Helper function to apply modifications to a specific NAL unit's payload data
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
+//          IT CANNOT MODIFY Exp-Golomb fields like pic_width/height_in_luma_samples.
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -588,7 +590,7 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                      newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 7) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0-7.`);
                      // Clear bits 4-6 of byte 1, then set them
-                     modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & ~0xE) | (newValue << 1); // 0xE is binary 00001110
+                     modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & ~0x0E) | (newValue << 1); // 0xE is binary 00001110 -> corrected mask
                  } else if (fieldName === 'vps_temporal_id_nesting_flag') { // u(1) in byte 1
                      checkPayloadBounds(1);
                      newValue = parseInt(newValueStr, 10);
@@ -597,6 +599,11 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                      modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & ~0x01) | (newValue & 0x01);
                  }
                  // Note: vps_reserved_0xffff_16bits is marked as non-editable, so no modification logic here.
+                 else {
+                      // This case handles attempts to modify fields that were potentially editable
+                      // but don't have specific modification logic here (should not happen with current setup).
+                      console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range. Skipping modification for this field.`);
+                 }
              }
              // --- SPS Fields (Type 33) --- Applicable only if nalType is 33
              else if (nalType === 33) {
@@ -610,7 +617,7 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                      newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 7) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0-7.`);
                      // Clear bits 4-6 of byte 0, then set them
-                     modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0xE) | (newValue << 1); // 0xE is binary 00001110
+                     modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0x0E) | (newValue << 1); // 0xE is binary 00001110
                  } else if (fieldName === 'sps_temporal_id_nesting_flag') { // u(1) in byte 0
                      checkPayloadBounds(0);
                      newValue = parseInt(newValueStr, 10);
@@ -619,13 +626,17 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                       modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0x01) | (newValue & 0x01);
                  }
                  // IMPORTANT: Cannot modify any fields after these initial ones (e.g., profile_tier_level,
-                 // sps_seq_parameter_set_id, chroma_format_idc, pic_width_in_luma_samples)
+                 // sps_seq_parameter_set_id, chroma_format_idc, pic_width_in_luma_samples, pic_height_in_luma_samples)
                  // because their offsets are unknown and/or they use Exp-Golomb encoding.
                  // The input fields for these should be disabled by displayFields.
                  else {
                       // This case handles attempts to modify fields that were potentially editable
                       // but don't have specific modification logic here (should not happen with current setup).
-                      console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range. Skipping modification for this field.`);
+                      console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range (e.g., requires Exp-Golomb or offset calculation). Skipping modification for this field.`);
+                      // Explicitly check for the fields that cannot be modified here:
+                      if (fieldName === 'pic_width_in_luma_samples' || fieldName === 'pic_height_in_luma_samples') {
+                            throw new Error(`FATAL: Attempted to modify '${fieldName}' which requires Exp-Golomb parsing/writing and offset calculation, not supported by this tool.`);
+                      }
                  }
              }
              // --- AUD Fields (Type 35) --- Applicable only if nalType is 35
@@ -634,8 +645,11 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                       checkPayloadBounds(0);
                       newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 7) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0-7.`);
-                     // Clear bits 0-2 of byte 0, then set them
+                     // Clear bits 0-2 of byte 0, then set them (These are bits 5, 6, 7 in the byte)
                      modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0xE0) | (newValue << 5); // 0xE0 is binary 11100000
+                 }
+                 else {
+                      console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range. Skipping modification for this field.`);
                  }
              }
              // --- Add other NAL types IF simple, fixed-bit fields at the start need modification ---
