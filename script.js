@@ -1,5 +1,5 @@
 
-const version = 24
+const version = 25
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -176,11 +176,11 @@ function extractFields(nalType, payloadData) {
     // WARNING: This parser is extremely basic. It only attempts to read a few
     // fixed-bit-length fields (u(n), f(n)) at the very START of specific NAL unit payloads.
     // It CANNOT parse:
-    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265 (e.g., pic_width/height, conf_win_*_offset, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4, sps_max_dec_pic_buffering_minus1, log2_min_luma_coding_block_size_minus3, log2_diff_max_min_luma_coding_block_size).
-    //   - Fields located after variable-length fields (like profile_tier_level, or anything after ue(v)/se(v)).
-    //   - Conditional fields based on previously parsed values (like conf_win_left_offset depending on conformance_window_flag, or bit_depth_chroma_minus8 depending on chroma_format_idc).
+    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265.
+    //   - Fields located after variable-length fields.
+    //   - Conditional fields based on previously parsed values.
     //   - Fields requiring removal of emulation prevention bytes (0x000003 -> 0x0000).
-    //   - Looping structures (like for sps_max_dec_pic_buffering_minus1).
+    //   - Looping structures.
     // A proper H.265 parser requires a bitstream reader capable of handling these complexities.
     let fields = [];
     if (payloadData.length === 0) return fields; // No payload to parse
@@ -210,16 +210,7 @@ function extractFields(nalType, payloadData) {
 
             // --- Following fields require more complex parsing ---
             // profile_tier_level() structure (variable length, min 12 bytes)
-            // vps_sub_layer_ordering_info_present_flag u(1)
-            // loops for sub-layer ordering info (if present)
-            // vps_max_dec_pic_buffering_minus1[i] ue(v)
-            // vps_max_num_reorder_pics[i] ue(v)
-            // vps_max_latency_increase_plus1[i] ue(v)
-            // vps_max_layer_id u(6)
-            // vps_num_layer_sets_minus1 ue(v)
-            // loops for layer_id_included_flag[ i ][ j ] u(1)
-            // vps_timing_info_present_flag u(1)
-            // ...and so on.
+            // ... and many more ue(v), conditional, loop fields ...
             fields.push({ name: "...", value: "(More fields require complex parsing: profile_tier_level, ue(v), loops, etc.)" });
 
         } else if (nalType === 33) { // SPS_NUT (Sequence Parameter Set, Section 7.3.2.2)
@@ -246,78 +237,57 @@ function extractFields(nalType, payloadData) {
             fields.push({ name: "sps_seq_parameter_set_id", value: "Requires ue(v) parsing AFTER profile_tier_level()" });
 
             // --- chroma_format_idc: ue(v) ---
-            // This field comes *after* sps_seq_parameter_set_id. Cannot parse.
-            // Standard values: 0 (monochrome), 1 (4:2:0), 2 (4:2:2), 3 (4:4:4).
             fields.push({ name: "chroma_format_idc", value: "Requires ue(v) parsing AFTER sps_seq_parameter_set_id" });
 
             // --- separate_colour_plane_flag: u(1) ---
-            // This field is CONDITIONAL: `if( chroma_format_idc == 3 )`
-            // It appears *after* chroma_format_idc. Cannot parse.
+            // CONDITIONAL: `if( chroma_format_idc == 3 )`. Cannot parse.
             fields.push({ name: "separate_colour_plane_flag", value: "Requires parsing chroma_format_idc (after ue(v) fields) and checking condition" });
 
             // --- pic_width_in_luma_samples: ue(v) ---
-            // Comes *after* chroma_format_idc and potential separate_colour_plane_flag.
-            // Cannot parse without decoding previous variable-length fields.
             fields.push({ name: "pic_width_in_luma_samples", value: "Requires ue(v) parsing AFTER chroma_format_idc/separate_colour_plane_flag" });
 
             // --- pic_height_in_luma_samples: ue(v) ---
-            // Comes *after* pic_width_in_luma_samples.
-            // Cannot parse without decoding previous variable-length fields.
             fields.push({ name: "pic_height_in_luma_samples", value: "Requires ue(v) parsing AFTER pic_width_in_luma_samples" });
 
              // --- conformance_window_flag: u(1) ---
-             // Comes after pic_height_in_luma_samples. Cannot parse accurately as its offset depends on prior ue(v) fields.
              fields.push({ name: "conformance_window_flag", value: "Requires parsing AFTER pic_height_in_luma_samples (ue(v))" });
 
              // --- Conformance Window Offsets (Conditional & ue(v)) ---
-             // These appear ONLY if conformance_window_flag is 1, and *after* that flag.
-             // They are ue(v) coded, making them impossible to parse/modify with this simple script.
              fields.push({ name: "conf_win_left_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
              fields.push({ name: "conf_win_right_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
              fields.push({ name: "conf_win_top_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
              fields.push({ name: "conf_win_bottom_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
 
              // --- bit_depth_luma_minus8: ue(v) ---
-             // Comes *after* conformance window info (if present), which follows ue(v) fields.
-             // Cannot parse without decoding previous variable-length and ue(v) fields.
              fields.push({ name: "bit_depth_luma_minus8", value: "Requires ue(v) parsing AFTER conformance window fields" });
 
              // --- bit_depth_chroma_minus8: ue(v) ---
-             // Comes *after* bit_depth_luma_minus8.
-             // Also conditional: `if( chroma_format_idc != 0 )`
-             // Cannot parse without decoding previous variable-length and ue(v) fields, including chroma_format_idc.
+             // Conditional: `if( chroma_format_idc != 0 )`. Cannot parse.
              fields.push({ name: "bit_depth_chroma_minus8", value: "Requires ue(v) parsing AFTER bit_depth_luma_minus8 AND parsing chroma_format_idc" });
 
             // --- log2_max_pic_order_cnt_lsb_minus4: ue(v) ---
-            // Comes *after* bit_depth_chroma_minus8 (which is conditional and ue(v)).
-            // Cannot parse without decoding previous variable-length and ue(v) fields.
             fields.push({ name: "log2_max_pic_order_cnt_lsb_minus4", value: "Requires ue(v) parsing AFTER bit_depth_chroma_minus8" });
 
-            // --- sps_sub_layer_ordering_info_present_flag: u(1) --- [Position approximated]
-            // Comes *after* log2_max_pic_order_cnt_lsb_minus4. Cannot parse accurately.
+            // --- sps_sub_layer_ordering_info_present_flag: u(1) ---
             fields.push({ name: "sps_sub_layer_ordering_info_present_flag", value: "Requires parsing AFTER log2_max_pic_order_cnt_lsb_minus4 (ue(v))" });
 
-            // --- Sub-layer Ordering Info Loop ---
-            // The following fields appear inside a loop `for( i = ...; i <= sps_max_sub_layers_minus1; i++ )`
-            // which *follows* sps_sub_layer_ordering_info_present_flag (if that flag is 1, otherwise the loop uses i=sps_max_sub_layers_minus1).
-            // Cannot parse without decoding previous ue(v) fields, handling the flag, and handling the loop structure.
-
-            // --- sps_max_dec_pic_buffering_minus1[i]: ue(v) ---
+            // --- Sub-layer Ordering Info Loop (ue(v) fields inside) ---
+            // Cannot parse without handling the loop and ue(v).
             fields.push({ name: "sps_max_dec_pic_buffering_minus1[i]", value: "Requires ue(v) parsing within loop AFTER sps_sub_layer_ordering_info_present_flag" });
-
-            // --- sps_max_num_reorder_pics[i]: ue(v) ---
             fields.push({ name: "sps_max_num_reorder_pics[i]", value: "Requires ue(v) parsing within loop AFTER sps_max_dec_pic_buffering_minus1" });
-
-            // --- sps_max_latency_increase_plus1[i]: ue(v) ---
             fields.push({ name: "sps_max_latency_increase_plus1[i]", value: "Requires ue(v) parsing within loop AFTER sps_max_num_reorder_pics" });
 
             // --- log2_min_luma_coding_block_size_minus3: ue(v) ---
             // Comes AFTER the sub-layer ordering info loop.
             fields.push({ name: "log2_min_luma_coding_block_size_minus3", value: "Requires ue(v) parsing AFTER sub-layer ordering info loop" });
 
-            // --- log2_diff_max_min_luma_coding_block_size: ue(v) --- [ADDED]
+            // --- log2_diff_max_min_luma_coding_block_size: ue(v) ---
             // Comes AFTER log2_min_luma_coding_block_size_minus3.
             fields.push({ name: "log2_diff_max_min_luma_coding_block_size", value: "Requires ue(v) parsing AFTER log2_min_luma_coding_block_size_minus3" });
+
+            // --- log2_min_transform_block_size_minus2: ue(v) --- [ADDED]
+            // Comes AFTER log2_diff_max_min_luma_coding_block_size.
+            fields.push({ name: "log2_min_transform_block_size_minus2", value: "Requires ue(v) parsing AFTER log2_diff_max_min_luma_coding_block_size" });
 
             // --- Many more fields follow, often ue(v), se(v) or conditional ---
             // Examples: log2_max_transform_block_size_minus2 ue(v), ... short_term_ref_pic_sets, ...
@@ -325,12 +295,11 @@ function extractFields(nalType, payloadData) {
             fields.push({ name: "...", value: "(Many more fields require complex parsing: ue(v), se(v), conditionals, loops, VUI, etc.)" });
 
         } else if (nalType === 34) { // PPS_NUT (Picture Parameter Set, Section 7.3.2.3)
-            // pps_pic_parameter_set_id: ue(v) -> Starts at bit 0 of payload
-            // pps_seq_parameter_set_id: ue(v) -> Starts after pps_pic_parameter_set_id
-            // **Cannot reliably extract these without Exp-Golomb parsing**
+            // pps_pic_parameter_set_id: ue(v)
+            // pps_seq_parameter_set_id: ue(v)
             fields.push({ name: "pps_pic_parameter_set_id", value: "Requires Exp-Golomb (ue(v)) parsing" });
             fields.push({ name: "pps_seq_parameter_set_id", value: "Requires Exp-Golomb (ue(v)) parsing AFTER pps_pic_parameter_set_id" });
-            // dependent_slice_segments_enabled_flag: u(1) -> Comes after pps_seq_parameter_set_id
+            // dependent_slice_segments_enabled_flag: u(1)
             fields.push({ name: "dependent_slice_segments_enabled_flag", value: "Requires parsing AFTER pps_seq_parameter_set_id (ue(v))" });
              // --- Many more fields follow, heavily dependent on ue(v), se(v) and flags ---
             fields.push({ name: "...", value: "(Many more fields require complex parsing)" });
@@ -343,11 +312,8 @@ function extractFields(nalType, payloadData) {
             // pic_type: u(3) -> bits 0-2 of first payload byte
              fields.push({ name: "pic_type", value: (payloadData[0] >> 5) & 0x07 });
              // The remaining 5 bits are reserved (should be 0) but not parsed here.
-             // H.265 Table 7-6 defines pic_type values (0: I, B, P; 1: I, P; 2: I; etc.)
         }
         // Add parsing logic for other NAL types here if needed and feasible with the limited approach.
-        // SEI (39, 40) parsing is particularly complex due to variable payload types and lengths.
-        // Slice segments (0-23) parsing is extremely complex (slice header, then coded data).
 
     } catch (e) {
         console.error("Error during basic parsing of NAL unit payload (Type " + nalType + "): ", e);
@@ -402,7 +368,8 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'sps_max_num_reorder_pics[i]' && // Explicitly disable (ue(v) in loop)
                 field.name !== 'sps_max_latency_increase_plus1[i]' && // Explicitly disable (ue(v) in loop)
                 field.name !== 'log2_min_luma_coding_block_size_minus3' && // Explicitly disable (ue(v) after loop)
-                field.name !== 'log2_diff_max_min_luma_coding_block_size' && // [ADDED] Explicitly disable (ue(v))
+                field.name !== 'log2_diff_max_min_luma_coding_block_size' && // Explicitly disable (ue(v))
+                field.name !== 'log2_min_transform_block_size_minus2' && // [ADDED] Explicitly disable (ue(v))
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
@@ -453,7 +420,7 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4, sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics, sps_max_latency_increase_plus1, log2_min_luma_coding_block_size_minus3, log2_diff_max_min_luma_coding_block_size), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, etc.), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -602,10 +569,7 @@ function modifyStream() {
 // Helper function to apply modifications to a specific NAL unit's payload data
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
-//          IT CANNOT MODIFY Exp-Golomb fields like pic_width/height_in_luma_samples,
-//          conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4,
-//          sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics, sps_max_latency_increase_plus1,
-//          log2_min_luma_coding_block_size_minus3, log2_diff_max_min_luma_coding_block_size, or fields after them.
+//          IT CANNOT MODIFY Exp-Golomb fields or fields after them.
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -633,9 +597,6 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
          try {
              // --- NAL Header Fields ---
              // Modification of header fields is generally complex and not implemented here.
-             // e.g., changing nal_unit_type could break the stream.
-             // If header fields were made editable, their logic would go here, operating
-             // on bytes at `payloadOffset - 2` and `payloadOffset - 1`, with careful bounds checking.
 
              // --- VPS Fields (Type 32) --- Applicable only if nalType is 32
              if (nalType === 32) {
@@ -706,7 +667,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  // sps_seq_parameter_set_id, chroma_format_idc, pic_width_in_luma_samples, pic_height_in_luma_samples,
                  // conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4,
                  // sps_sub_layer_ordering_info_present_flag, sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics,
-                 // sps_max_latency_increase_plus1, log2_min_luma_coding_block_size_minus3, log2_diff_max_min_luma_coding_block_size etc.)
+                 // sps_max_latency_increase_plus1, log2_min_luma_coding_block_size_minus3,
+                 // log2_diff_max_min_luma_coding_block_size, log2_min_transform_block_size_minus2 etc.)
                  // because their offsets are unknown and/or they use Exp-Golomb encoding or are in loops.
                  // The input fields for these should be disabled by displayFields.
                  else {
@@ -726,7 +688,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'sps_max_num_reorder_pics[i]' ||
                           fieldName === 'sps_max_latency_increase_plus1[i]' ||
                           fieldName === 'log2_min_luma_coding_block_size_minus3' ||
-                          fieldName === 'log2_diff_max_min_luma_coding_block_size' || // [ADDED] Explicit check
+                          fieldName === 'log2_diff_max_min_luma_coding_block_size' ||
+                          fieldName === 'log2_min_transform_block_size_minus2' || // [ADDED] Explicit check
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
