@@ -1,5 +1,5 @@
 
-const version = 25
+const version = 26
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -285,12 +285,17 @@ function extractFields(nalType, payloadData) {
             // Comes AFTER log2_min_luma_coding_block_size_minus3.
             fields.push({ name: "log2_diff_max_min_luma_coding_block_size", value: "Requires ue(v) parsing AFTER log2_min_luma_coding_block_size_minus3" });
 
-            // --- log2_min_transform_block_size_minus2: ue(v) --- [ADDED]
+            // --- log2_min_transform_block_size_minus2: ue(v) ---
             // Comes AFTER log2_diff_max_min_luma_coding_block_size.
             fields.push({ name: "log2_min_transform_block_size_minus2", value: "Requires ue(v) parsing AFTER log2_diff_max_min_luma_coding_block_size" });
 
+            // --- log2_diff_max_min_transform_block_size: ue(v) --- [NEWLY ADDED FIELD]
+            // Comes AFTER log2_min_transform_block_size_minus2.
+            fields.push({ name: "log2_diff_max_min_transform_block_size", value: "Requires ue(v) parsing AFTER log2_min_transform_block_size_minus2" });
+
             // --- Many more fields follow, often ue(v), se(v) or conditional ---
-            // Examples: log2_max_transform_block_size_minus2 ue(v), ... short_term_ref_pic_sets, ...
+            // Examples: max_transform_hierarchy_depth_inter ue(v), max_transform_hierarchy_depth_intra ue(v),
+            // scaling_list_enabled_flag u(1), ... short_term_ref_pic_sets, ...
             // vui_parameters_present_flag u(1)...
             fields.push({ name: "...", value: "(Many more fields require complex parsing: ue(v), se(v), conditionals, loops, VUI, etc.)" });
 
@@ -369,7 +374,8 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'sps_max_latency_increase_plus1[i]' && // Explicitly disable (ue(v) in loop)
                 field.name !== 'log2_min_luma_coding_block_size_minus3' && // Explicitly disable (ue(v) after loop)
                 field.name !== 'log2_diff_max_min_luma_coding_block_size' && // Explicitly disable (ue(v))
-                field.name !== 'log2_min_transform_block_size_minus2' && // [ADDED] Explicitly disable (ue(v))
+                field.name !== 'log2_min_transform_block_size_minus2' && // Explicitly disable (ue(v))
+                field.name !== 'log2_diff_max_min_transform_block_size' && // [ADDED] Explicitly disable (ue(v))
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
@@ -668,7 +674,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  // conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4,
                  // sps_sub_layer_ordering_info_present_flag, sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics,
                  // sps_max_latency_increase_plus1, log2_min_luma_coding_block_size_minus3,
-                 // log2_diff_max_min_luma_coding_block_size, log2_min_transform_block_size_minus2 etc.)
+                 // log2_diff_max_min_luma_coding_block_size, log2_min_transform_block_size_minus2,
+                 // log2_diff_max_min_transform_block_size, etc.)
                  // because their offsets are unknown and/or they use Exp-Golomb encoding or are in loops.
                  // The input fields for these should be disabled by displayFields.
                  else {
@@ -689,7 +696,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'sps_max_latency_increase_plus1[i]' ||
                           fieldName === 'log2_min_luma_coding_block_size_minus3' ||
                           fieldName === 'log2_diff_max_min_luma_coding_block_size' ||
-                          fieldName === 'log2_min_transform_block_size_minus2' || // [ADDED] Explicit check
+                          fieldName === 'log2_min_transform_block_size_minus2' ||
+                          fieldName === 'log2_diff_max_min_transform_block_size' || // [ADDED] Explicit check
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
