@@ -1,5 +1,5 @@
 
-const version = 28
+const version = 29
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -297,12 +297,16 @@ function extractFields(nalUnitType, payloadData) {
             // Comes AFTER log2_diff_max_min_transform_block_size.
             fields.push({ name: "max_transform_hierarchy_depth_inter", value: "Requires ue(v) parsing AFTER log2_diff_max_min_transform_block_size" });
 
-             // --- max_transform_hierarchy_depth_intra: ue(v) --- [MODIFIED]
+             // --- max_transform_hierarchy_depth_intra: ue(v) ---
             // Comes AFTER max_transform_hierarchy_depth_inter.
             fields.push({ name: "max_transform_hierarchy_depth_intra", value: "Requires ue(v) parsing AFTER max_transform_hierarchy_depth_inter" });
 
+            // --- scaling_list_enabled_flag: u(1) --- [ADDED]
+            // Comes AFTER max_transform_hierarchy_depth_intra (ue(v)). Cannot parse.
+            fields.push({ name: "scaling_list_enabled_flag", value: "Requires parsing AFTER max_transform_hierarchy_depth_intra (ue(v))" });
+
             // --- Many more fields follow, often ue(v), se(v) or conditional ---
-            // Examples: scaling_list_enabled_flag u(1), amp_enabled_flag u(1),
+            // Examples: scaling_list_data(), amp_enabled_flag u(1),
             // sample_adaptive_offset_enabled_flag u(1), pcm_enabled_flag u(1), ...
             // short_term_ref_pic_sets, long_term_ref_pics_present_flag u(1), ...
             // vui_parameters_present_flag u(1)...
@@ -385,8 +389,9 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'log2_diff_max_min_luma_coding_block_size' && // Explicitly disable (ue(v))
                 field.name !== 'log2_min_transform_block_size_minus2' && // Explicitly disable (ue(v))
                 field.name !== 'log2_diff_max_min_transform_block_size' && // Explicitly disable (ue(v))
-                field.name !== 'max_transform_hierarchy_depth_inter' && // [ADDED] Explicitly disable (ue(v))
-                field.name !== 'max_transform_hierarchy_depth_intra' && // [ADDED] Explicitly disable (ue(v))
+                field.name !== 'max_transform_hierarchy_depth_inter' && // Explicitly disable (ue(v))
+                field.name !== 'max_transform_hierarchy_depth_intra' && // Explicitly disable (ue(v))
+                field.name !== 'scaling_list_enabled_flag' && // [ADDED] Explicitly disable (after ue(v))
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
@@ -437,8 +442,8 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    // [MODIFIED] Updated warning to include max_transform_hierarchy_depth_intra
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, etc.), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    // [MODIFIED] Updated warning to include max_transform_hierarchy_depth_intra and scaling_list_enabled_flag
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, etc.), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -587,7 +592,7 @@ function modifyStream() {
 // Helper function to apply modifications to a specific NAL unit's payload data
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
-//          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ..., max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra).
+//          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ..., max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag).
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -688,12 +693,12 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  // sps_max_latency_increase_plus1, log2_min_luma_coding_block_size_minus3,
                  // log2_diff_max_min_luma_coding_block_size, log2_min_transform_block_size_minus2,
                  // log2_diff_max_min_transform_block_size, max_transform_hierarchy_depth_inter,
-                 // max_transform_hierarchy_depth_intra, etc.)
+                 // max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, etc.)
                  // because their offsets are unknown and/or they use Exp-Golomb encoding or are in loops.
                  // The input fields for these should be disabled by displayFields.
                  else {
                       // Throw an error if modification is attempted for known complex/unsupported fields
-                      // [MODIFIED] Added max_transform_hierarchy_depth_intra to the check
+                      // [MODIFIED] Added scaling_list_enabled_flag to the check
                       if (fieldName === 'pic_width_in_luma_samples' ||
                           fieldName === 'pic_height_in_luma_samples' ||
                           fieldName === 'conformance_window_flag' ||
@@ -714,6 +719,7 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'log2_diff_max_min_transform_block_size' ||
                           fieldName === 'max_transform_hierarchy_depth_inter' ||
                           fieldName === 'max_transform_hierarchy_depth_intra' ||
+                          fieldName === 'scaling_list_enabled_flag' || // [ADDED]
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
