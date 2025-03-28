@@ -1,5 +1,5 @@
 
-const version = 19
+const version = 20
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -176,10 +176,11 @@ function extractFields(nalType, payloadData) {
     // WARNING: This parser is extremely basic. It only attempts to read a few
     // fixed-bit-length fields (u(n), f(n)) at the very START of specific NAL unit payloads.
     // It CANNOT parse:
-    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265 (e.g., pic_width/height, conf_win_*_offset, bit_depth_luma_minus8, bit_depth_chroma_minus8, log2_max_pic_order_cnt_lsb_minus4).
+    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265 (e.g., pic_width/height, conf_win_*_offset, bit_depth_luma_minus8, bit_depth_chroma_minus8, log2_max_pic_order_cnt_lsb_minus4, sps_max_dec_pic_buffering_minus1).
     //   - Fields located after variable-length fields (like profile_tier_level, or anything after ue(v)/se(v)).
     //   - Conditional fields based on previously parsed values (like conf_win_left_offset depending on conformance_window_flag, or bit_depth_chroma_minus8 depending on chroma_format_idc).
     //   - Fields requiring removal of emulation prevention bytes (0x000003 -> 0x0000).
+    //   - Looping structures (like for sps_max_dec_pic_buffering_minus1).
     // A proper H.265 parser requires a bitstream reader capable of handling these complexities.
     let fields = [];
     if (payloadData.length === 0) return fields; // No payload to parse
@@ -287,13 +288,31 @@ function extractFields(nalType, payloadData) {
              // Cannot parse without decoding previous variable-length and ue(v) fields, including chroma_format_idc.
              fields.push({ name: "bit_depth_chroma_minus8", value: "Requires ue(v) parsing AFTER bit_depth_luma_minus8 AND parsing chroma_format_idc" });
 
-            // --- log2_max_pic_order_cnt_lsb_minus4: ue(v) --- [ADDED]
+            // --- log2_max_pic_order_cnt_lsb_minus4: ue(v) ---
             // Comes *after* bit_depth_chroma_minus8 (which is conditional and ue(v)).
             // Cannot parse without decoding previous variable-length and ue(v) fields.
             fields.push({ name: "log2_max_pic_order_cnt_lsb_minus4", value: "Requires ue(v) parsing AFTER bit_depth_chroma_minus8" });
 
+            // --- sps_sub_layer_ordering_info_present_flag: u(1) --- [Position approximated]
+            // Comes *after* log2_max_pic_order_cnt_lsb_minus4. Cannot parse accurately.
+            fields.push({ name: "sps_sub_layer_ordering_info_present_flag", value: "Requires parsing AFTER log2_max_pic_order_cnt_lsb_minus4 (ue(v))" });
+
+            // --- sps_max_dec_pic_buffering_minus1[i]: ue(v) --- [ADDED HERE]
+            // This field appears inside a loop `for( i = ...; i <= sps_max_sub_layers_minus1; i++ )`
+            // which *follows* sps_sub_layer_ordering_info_present_flag.
+            // Cannot parse without decoding previous ue(v) fields, handling the flag, and handling the loop structure.
+            fields.push({ name: "sps_max_dec_pic_buffering_minus1[i]", value: "Requires ue(v) parsing within loop AFTER sps_sub_layer_ordering_info_present_flag" });
+
+            // --- sps_max_num_reorder_pics[i]: ue(v) --- [Position approximated, relative to above]
+            // Appears in the same loop as sps_max_dec_pic_buffering_minus1.
+            fields.push({ name: "sps_max_num_reorder_pics[i]", value: "Requires ue(v) parsing within loop AFTER sps_max_dec_pic_buffering_minus1" });
+
+            // --- sps_max_latency_increase_plus1[i]: ue(v) --- [Position approximated, relative to above]
+            // Appears in the same loop as sps_max_dec_pic_buffering_minus1.
+            fields.push({ name: "sps_max_latency_increase_plus1[i]", value: "Requires ue(v) parsing within loop AFTER sps_max_num_reorder_pics" });
+
             // --- Many more fields follow, often ue(v), se(v) or conditional ---
-            // Examples: sps_sub_layer_ordering_info_present_flag u(1), ... short_term_ref_pic_sets, ...
+            // Examples: log2_min_luma_coding_block_size_minus3 ue(v), ... short_term_ref_pic_sets, ...
             // vui_parameters_present_flag u(1)...
             fields.push({ name: "...", value: "(Many more fields require complex parsing: ue(v), se(v), conditionals, loops, VUI, etc.)" });
 
@@ -351,6 +370,7 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
             const isPotentiallyEditable =
                 // Exclude placeholder/info fields explicitly
                 !field.name.endsWith("...") &&
+                !field.name.includes("[i]") && // Exclude fields representing array elements from loops
                 !field.name.includes(" Error") && // Exclude "Payload Error", "Parsing Error"
                 !field.name.includes("(Structure skipped") &&
                 !field.name.includes("Requires ") && // Excludes "Requires Exp-Golomb", "Requires ue(v)..." etc.
@@ -368,14 +388,18 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'conf_win_bottom_offset' && // Explicitly disable the conformance window offsets
                 field.name !== 'bit_depth_luma_minus8' &&   // Explicitly disable bit depth (requires ue(v))
                 field.name !== 'bit_depth_chroma_minus8' && // Explicitly disable chroma bit depth (requires ue(v))
-                field.name !== 'log2_max_pic_order_cnt_lsb_minus4' && // Explicitly disable log2_max_poc_lsb (requires ue(v)) [ADDED]
+                field.name !== 'log2_max_pic_order_cnt_lsb_minus4' && // Explicitly disable log2_max_poc_lsb (requires ue(v))
+                field.name !== 'sps_sub_layer_ordering_info_present_flag' && // Explicitly disable (after ue(v))
+                field.name !== 'sps_max_dec_pic_buffering_minus1[i]' && // Explicitly disable (ue(v) in loop) [ADDED]
+                field.name !== 'sps_max_num_reorder_pics[i]' && // Explicitly disable (ue(v) in loop)
+                field.name !== 'sps_max_latency_increase_plus1[i]' && // Explicitly disable (ue(v) in loop)
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
                 // Add more specific field names here if they are parsed but shouldn't be edited
 
             const disabledAttr = isPotentiallyEditable ? "" : "disabled";
-            const titleAttr = isPotentiallyEditable ? "" : `title="Parsing or Editing not supported for this field type/value in this tool due to H.265 complexity (e.g., Exp-Golomb, variable offsets, conditionals)."`;
+            const titleAttr = isPotentiallyEditable ? "" : `title="Parsing or Editing not supported for this field type/value in this tool due to H.265 complexity (e.g., Exp-Golomb, variable offsets, conditionals, loops)."`;
 
             // Use text input for simplicity; number validation happens on modification attempt
             fieldDiv.innerHTML = `<label for="${inputId}">${field.name}:</label> <input type="text" id="${inputId}" data-nal-index="${nalIndex}" data-field-name="${field.name}" value="${field.value}" ${disabledAttr} ${titleAttr}>`;
@@ -419,7 +443,7 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_left_offset, conf_win_right_offset, conf_win_top_offset, conf_win_bottom_offset, bit_depth_luma_minus8, bit_depth_chroma_minus8, log2_max_pic_order_cnt_lsb_minus4), fields after variable-length structures (like profile_tier_level), conditional fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4, sps_max_dec_pic_buffering_minus1), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -569,8 +593,8 @@ function modifyStream() {
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
 //          IT CANNOT MODIFY Exp-Golomb fields like pic_width/height_in_luma_samples,
-//          conformance_window_flag, conf_win_left_offset/conf_win_right_offset/conf_win_top_offset/conf_win_bottom_offset,
-//          bit_depth_luma_minus8, bit_depth_chroma_minus8, log2_max_pic_order_cnt_lsb_minus4 or fields after them.
+//          conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4,
+//          sps_max_dec_pic_buffering_minus1, or fields after them.
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -669,9 +693,9 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  }
                  // IMPORTANT: Cannot modify any fields after these initial ones (e.g., profile_tier_level,
                  // sps_seq_parameter_set_id, chroma_format_idc, pic_width_in_luma_samples, pic_height_in_luma_samples,
-                 // conformance_window_flag, conf_win_left_offset, conf_win_right_offset, conf_win_top_offset, conf_win_bottom_offset,
-                 // bit_depth_luma_minus8, bit_depth_chroma_minus8, log2_max_pic_order_cnt_lsb_minus4, etc.)
-                 // because their offsets are unknown and/or they use Exp-Golomb encoding.
+                 // conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4,
+                 // sps_sub_layer_ordering_info_present_flag, sps_max_dec_pic_buffering_minus1, etc.)
+                 // because their offsets are unknown and/or they use Exp-Golomb encoding or are in loops.
                  // The input fields for these should be disabled by displayFields.
                  else {
                       // Throw an error if modification is attempted for known complex/unsupported fields
@@ -684,12 +708,16 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'conf_win_bottom_offset' ||
                           fieldName === 'bit_depth_luma_minus8' || // Explicit check
                           fieldName === 'bit_depth_chroma_minus8' || // Explicit check
-                          fieldName === 'log2_max_pic_order_cnt_lsb_minus4' || // Explicit check [ADDED]
+                          fieldName === 'log2_max_pic_order_cnt_lsb_minus4' || // Explicit check
+                          fieldName === 'sps_sub_layer_ordering_info_present_flag' || // Explicit check
+                          fieldName === 'sps_max_dec_pic_buffering_minus1[i]' || // Explicit check [ADDED]
+                          fieldName === 'sps_max_num_reorder_pics[i]' || // Explicit check
+                          fieldName === 'sps_max_latency_increase_plus1[i]' || // Explicit check
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
                           fieldName === 'dependent_slice_segments_enabled_flag') { // Added from PPS context, applies conceptually here too
-                            throw new Error(`FATAL: Attempted to modify '${fieldName}' which requires Exp-Golomb parsing/writing or complex offset calculation, not supported by this tool.`);
+                            throw new Error(`FATAL: Attempted to modify '${fieldName}' which requires Exp-Golomb parsing/writing, complex offset calculation, or loop handling, none of which are supported by this tool.`);
                       }
                       // Warn for any other unexpected editable fields
                       console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range (e.g., requires Exp-Golomb or offset calculation). Skipping modification for this field.`);
