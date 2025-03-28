@@ -1,5 +1,5 @@
 
-const version = 39
+const version = 40
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -211,7 +211,8 @@ function extractFields(nalUnitType, payloadData) {
             // --- Following fields require more complex parsing ---
             // profile_tier_level() structure (variable length, min 12 bytes)
             // ... and many more ue(v), conditional, loop fields ...
-            fields.push({ name: "...", value: "(More fields require complex parsing: profile_tier_level, ue(v), loops, etc.)" });
+            fields.push({ name: "profile_tier_level()", value: "(Structure skipped - complex & variable length)" });
+            fields.push({ name: "...", value: "(More fields require complex parsing: ue(v), loops, etc.)" });
 
         } else if (nalUnitType === 33) { // SPS_NUT (Sequence Parameter Set, Section 7.3.2.2)
             if (payloadData.length < 1) { // Need at least 1 byte for the first few fields
@@ -329,15 +330,58 @@ function extractFields(nalUnitType, payloadData) {
             fields.push({ name: "log2_diff_max_min_pcm_luma_coding_block_size", value: "Requires parsing pcm_enabled_flag AND ue(v) parsing" });
             fields.push({ name: "pcm_loop_filter_disabled_flag", value: "Requires parsing pcm_enabled_flag" });
 
-            // --- num_short_term_ref_pic_sets: ue(v) --- ADDED
+            // --- num_short_term_ref_pic_sets: ue(v) ---
             // Comes AFTER conditional PCM fields
             fields.push({ name: "num_short_term_ref_pic_sets", value: "Requires ue(v) parsing AFTER PCM fields" });
 
-            // --- Many more fields follow ---
-            // Examples: short_term_ref_pic_set() loop, long_term_ref_pics_present_flag u(1), ...
-            // sps_temporal_mvp_enabled_flag u(1), sps_strong_intra_smoothing_enabled_flag u(1), ...
-            // vui_parameters_present_flag u(1)...
-            fields.push({ name: "...", value: "(Many more fields require complex parsing: loops (ST ref pic sets), conditionals, ue(v), se(v), VUI, etc.)" });
+            // --- short_term_ref_pic_set() loop --- ADDED placeholder
+            // Loop runs `num_short_term_ref_pic_sets` times. Each iteration parses a complex structure.
+            fields.push({ name: "short_term_ref_pic_set()", value: "(Loop structure skipped - requires parsing num_short_term_ref_pic_sets and complex internal fields)" });
+
+            // --- long_term_ref_pics_present_flag: u(1) --- ADDED
+            // Comes AFTER the short_term_ref_pic_set() loop
+            fields.push({ name: "long_term_ref_pics_present_flag", value: "Requires parsing AFTER short_term_ref_pic_set() loop" });
+
+            // --- Conditional Long Term Ref Pic fields (ue(v) etc) --- ADDED placeholder
+            // Appear if long_term_ref_pics_present_flag is 1. Cannot parse reliably.
+            fields.push({ name: "num_long_term_ref_pics_sps", value: "Requires parsing long_term_ref_pics_present_flag AND ue(v) parsing" });
+            fields.push({ name: "lt_ref_pic_poc_lsb_sps[i]", value: "Requires parsing num_long_term_ref_pics_sps AND u(v) parsing within loop" });
+            fields.push({ name: "used_by_curr_pic_lt_sps_flag[i]", value: "Requires parsing num_long_term_ref_pics_sps AND u(1) parsing within loop" });
+
+            // --- sps_temporal_mvp_enabled_flag: u(1) --- ADDED placeholder
+            // Comes AFTER the conditional Long Term Ref Pic fields.
+            fields.push({ name: "sps_temporal_mvp_enabled_flag", value: "Requires parsing AFTER LTRP fields" });
+
+            // --- sps_strong_intra_smoothing_enabled_flag: u(1) --- ADDED placeholder
+            // Comes AFTER sps_temporal_mvp_enabled_flag.
+            fields.push({ name: "sps_strong_intra_smoothing_enabled_flag", value: "Requires parsing AFTER sps_temporal_mvp_enabled_flag" });
+
+            // --- vui_parameters_present_flag: u(1) --- ADDED placeholder
+            // Comes AFTER sps_strong_intra_smoothing_enabled_flag.
+            fields.push({ name: "vui_parameters_present_flag", value: "Requires parsing AFTER sps_strong_intra_smoothing_enabled_flag" });
+
+            // --- vui_parameters() --- ADDED placeholder
+            // Conditional structure AFTER vui_parameters_present_flag. Very complex.
+            fields.push({ name: "vui_parameters()", value: "(Structure skipped - conditional & very complex)" });
+
+            // --- sps_extension_present_flag: u(1) --- ADDED placeholder
+            // Comes AFTER vui_parameters() or vui_parameters_present_flag.
+            fields.push({ name: "sps_extension_present_flag", value: "Requires parsing AFTER VUI fields" });
+
+            // --- Further extensions flags/data --- ADDED placeholder
+            fields.push({ name: "sps_range_extension_flag", value: "Conditional on sps_extension_present_flag" });
+            fields.push({ name: "sps_multilayer_extension_flag", value: "Conditional on sps_extension_present_flag" });
+            fields.push({ name: "sps_3d_extension_flag", value: "Conditional on sps_extension_present_flag" });
+            fields.push({ name: "sps_scc_extension_flag", value: "Conditional on sps_extension_present_flag" });
+            fields.push({ name: "sps_extension_4bits", value: "Conditional on sps_extension_present_flag" });
+
+            // --- Extension Data Structures --- ADDED placeholder
+            fields.push({ name: "sps_range_extension()", value: "(Structure skipped - conditional & complex)" });
+            fields.push({ name: "sps_multilayer_extension()", value: "(Structure skipped - conditional & complex)" });
+            // ... etc for other extensions ...
+
+            // --- Final "..." placeholder for anything missed or future additions ---
+            fields.push({ name: "...", value: "(End of SPS or requires parsing extensions, rbsp_trailing_bits)" });
 
         } else if (nalUnitType === 34) { // PPS_NUT (Picture Parameter Set, Section 7.3.2.3)
             // pps_pic_parameter_set_id: ue(v)
@@ -386,12 +430,12 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
 
             // Determine if the field *might* be editable based on its name and current value
             // This is a heuristic - it doesn't guarantee the modification will work correctly.
-            // [MODIFIED] Added num_short_term_ref_pic_sets to the disable list
+            // [MODIFIED] Added long_term_ref_pics_present_flag and related LTRP fields to the disable list
             const isPotentiallyEditable =
                 // Exclude placeholder/info fields explicitly
                 !field.name.endsWith("...") &&
-                !field.name.endsWith("()") && // Exclude profile_tier_level(), scaling_list_data()
-                !field.name.includes("[i]") && // Exclude fields representing array elements from loops
+                !field.name.endsWith("()") && // Exclude profile_tier_level(), scaling_list_data(), short_term_ref_pic_set(), vui_parameters(), sps_range_extension(), etc.
+                !field.name.includes("[i]") && // Exclude fields representing array elements from loops (e.g., sps_max_dec_pic_buffering_minus1[i], lt_ref_pic_poc_lsb_sps[i])
                 !field.name.includes(" Error") && // Exclude "Payload Error", "Parsing Error"
                 !field.name.includes("(Structure skipped") &&
                 !field.name.includes("Requires ") && // Excludes "Requires Exp-Golomb", "Requires ue(v)..." etc.
@@ -426,14 +470,25 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'log2_min_pcm_luma_coding_block_size_minus3' && // Explicitly disable (conditional ue(v))
                 field.name !== 'log2_diff_max_min_pcm_luma_coding_block_size' && // Explicitly disable (conditional ue(v))
                 field.name !== 'pcm_loop_filter_disabled_flag' && // Explicitly disable (conditional u(1))
-                field.name !== 'num_short_term_ref_pic_sets' && // Explicitly disable (ue(v)) - ADDED
+                field.name !== 'num_short_term_ref_pic_sets' && // Explicitly disable (ue(v))
+                field.name !== 'long_term_ref_pics_present_flag' && // Explicitly disable (u(1) after complex loop) - ADDED
+                field.name !== 'num_long_term_ref_pics_sps' && // Explicitly disable (conditional ue(v)) - ADDED
+                field.name !== 'sps_temporal_mvp_enabled_flag' && // Explicitly disable (u(1) after LTRP) - ADDED
+                field.name !== 'sps_strong_intra_smoothing_enabled_flag' && // Explicitly disable (u(1) after MVP) - ADDED
+                field.name !== 'vui_parameters_present_flag' && // Explicitly disable (u(1) after SIS) - ADDED
+                field.name !== 'sps_extension_present_flag' && // Explicitly disable (u(1) after VUI) - ADDED
+                field.name !== 'sps_range_extension_flag' && // Explicitly disable conditional extension flags - ADDED
+                field.name !== 'sps_multilayer_extension_flag' && // Explicitly disable conditional extension flags - ADDED
+                field.name !== 'sps_3d_extension_flag' && // Explicitly disable conditional extension flags - ADDED
+                field.name !== 'sps_scc_extension_flag' && // Explicitly disable conditional extension flags - ADDED
+                field.name !== 'sps_extension_4bits' && // Explicitly disable conditional extension flags - ADDED
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
                 // Add more specific field names here if they are parsed but shouldn't be edited
 
             const disabledAttr = isPotentiallyEditable ? "" : "disabled";
-            const titleAttr = isPotentiallyEditable ? "" : `title="Parsing or Editing not supported for this field type/value in this tool due to H.265 complexity (e.g., Exp-Golomb, variable offsets, conditionals, loops)."`;
+            const titleAttr = isPotentiallyEditable ? "" : `title="Parsing or Editing not supported for this field type/value in this tool due to H.265 complexity (e.g., Exp-Golomb, variable offsets, conditionals, loops, position after complex fields)."`;
 
             // Use text input for simplicity; number validation happens on modification attempt
             fieldDiv.innerHTML = `<label for="${inputId}">${field.name}:</label> <input type="text" id="${inputId}" data-nal-index="${nalIndex}" data-field-name="${field.name}" value="${field.value}" ${disabledAttr} ${titleAttr}>`;
@@ -477,8 +532,8 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    // [MODIFIED] Updated warning to include num_short_term_ref_pic_sets
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag, sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1, pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3, log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag, num_short_term_ref_pic_sets, etc.), fields after variable-length structures (like profile_tier_level or scaling_list_data), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    // [MODIFIED] Updated warning to include long_term_ref_pics_present_flag and subsequent fields
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, num_short_term_ref_pic_sets, num_long_term_ref_pics_sps, etc.), fields after variable-length structures (like profile_tier_level, scaling_list_data, short_term_ref_pic_set loops, vui_parameters, etc.), conditional fields (like long_term_ref_pics_present_flag, sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag, vui_parameters_present_flag, sps_extension_present_flag, and their dependent fields), looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -627,8 +682,10 @@ function modifyStream() {
 // Helper function to apply modifications to a specific NAL unit's payload data
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
-//          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ..., max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag, sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1, pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3, log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag, num_short_term_ref_pic_sets).
-// [MODIFIED] Added num_short_term_ref_pic_sets to the check
+//          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ...,
+//          num_short_term_ref_pic_sets, long_term_ref_pics_present_flag, num_long_term_ref_pics_sps,
+//          sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag, etc.).
+// [MODIFIED] Added long_term_ref_pics_present_flag and related fields to the check
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -722,23 +779,10 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                       // Clear bit 7 of byte 0 (mask 0000 0001), then set it
                       modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0x01) | (newValue & 0x01);
                  }
-                 // IMPORTANT: Cannot modify any fields after these initial ones (e.g., profile_tier_level,
-                 // sps_seq_parameter_set_id, chroma_format_idc, pic_width_in_luma_samples, pic_height_in_luma_samples,
-                 // conformance_window_flag, conf_win_*, bit_depth_*, log2_max_pic_order_cnt_lsb_minus4,
-                 // sps_sub_layer_ordering_info_present_flag, sps_max_dec_pic_buffering_minus1, sps_max_num_reorder_pics,
-                 // sps_max_latency_increase_plus1, log2_min_luma_coding_block_size_minus3,
-                 // log2_diff_max_min_luma_coding_block_size, log2_min_transform_block_size_minus2,
-                 // log2_diff_max_min_transform_block_size, max_transform_hierarchy_depth_inter,
-                 // max_transform_hierarchy_depth_intra, scaling_list_enabled_flag, sps_amp_enabled_flag,
-                 // sps_sample_adaptive_offset_enabled_flag, pcm_enabled_flag, pcm_sample_bit_depth_luma_minus1,
-                 // pcm_sample_bit_depth_chroma_minus1, log2_min_pcm_luma_coding_block_size_minus3,
-                 // log2_diff_max_min_pcm_luma_coding_block_size, pcm_loop_filter_disabled_flag,
-                 // num_short_term_ref_pic_sets, etc.)
-                 // because their offsets are unknown and/or they use Exp-Golomb encoding or are in loops.
-                 // The input fields for these should be disabled by displayFields.
+                 // IMPORTANT: Cannot modify any fields after these initial ones
                  else {
                       // Throw an error if modification is attempted for known complex/unsupported fields
-                      // [MODIFIED] Added num_short_term_ref_pic_sets to the check
+                      // [MODIFIED] Added long_term_ref_pics_present_flag and subsequent fields to the check
                       if (fieldName === 'pic_width_in_luma_samples' ||
                           fieldName === 'pic_height_in_luma_samples' ||
                           fieldName === 'conformance_window_flag' ||
@@ -768,7 +812,18 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'log2_min_pcm_luma_coding_block_size_minus3' ||
                           fieldName === 'log2_diff_max_min_pcm_luma_coding_block_size' ||
                           fieldName === 'pcm_loop_filter_disabled_flag' ||
-                          fieldName === 'num_short_term_ref_pic_sets' || // ADDED
+                          fieldName === 'num_short_term_ref_pic_sets' ||
+                          fieldName === 'long_term_ref_pics_present_flag' || // ADDED
+                          fieldName === 'num_long_term_ref_pics_sps' || // ADDED
+                          fieldName === 'sps_temporal_mvp_enabled_flag' || // ADDED
+                          fieldName === 'sps_strong_intra_smoothing_enabled_flag' || // ADDED
+                          fieldName === 'vui_parameters_present_flag' || // ADDED
+                          fieldName === 'sps_extension_present_flag' || // ADDED
+                          fieldName === 'sps_range_extension_flag' || // ADDED
+                          fieldName === 'sps_multilayer_extension_flag' || // ADDED
+                          fieldName === 'sps_3d_extension_flag' || // ADDED
+                          fieldName === 'sps_scc_extension_flag' || // ADDED
+                          fieldName === 'sps_extension_4bits' || // ADDED
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
