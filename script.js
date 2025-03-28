@@ -1,5 +1,5 @@
 
-const version = 42
+const version = 43
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -356,7 +356,7 @@ function extractFields(nalUnitType, payloadData) {
             // Comes AFTER sps_temporal_mvp_enabled_flag.
             fields.push({ name: "sps_strong_intra_smoothing_enabled_flag", value: "Requires parsing AFTER sps_temporal_mvp_enabled_flag" });
 
-            // --- vui_parameters_present_flag: u(1) --- ADDED placeholder
+            // --- vui_parameters_present_flag: u(1) --- ADDED placeholder (INCLUDED AS REQUESTED)
             // Comes AFTER sps_strong_intra_smoothing_enabled_flag.
             fields.push({ name: "vui_parameters_present_flag", value: "Requires parsing AFTER sps_strong_intra_smoothing_enabled_flag" });
 
@@ -430,7 +430,6 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
 
             // Determine if the field *might* be editable based on its name and current value
             // This is a heuristic - it doesn't guarantee the modification will work correctly.
-            // [MODIFIED] Added sps_strong_intra_smoothing_enabled_flag to the disable list
             const isPotentiallyEditable =
                 // Exclude placeholder/info fields explicitly
                 !field.name.endsWith("...") &&
@@ -474,8 +473,8 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'long_term_ref_pics_present_flag' && // Explicitly disable (u(1) after complex loop)
                 field.name !== 'num_long_term_ref_pics_sps' && // Explicitly disable (conditional ue(v))
                 field.name !== 'sps_temporal_mvp_enabled_flag' && // Explicitly disable (u(1) after LTRP)
-                field.name !== 'sps_strong_intra_smoothing_enabled_flag' && // Explicitly disable (u(1) after MVP) - ADDED
-                field.name !== 'vui_parameters_present_flag' && // Explicitly disable (u(1) after SIS)
+                field.name !== 'sps_strong_intra_smoothing_enabled_flag' && // Explicitly disable (u(1) after MVP)
+                field.name !== 'vui_parameters_present_flag' && // Explicitly disable (u(1) after SIS) - INCLUDED AS REQUESTED
                 field.name !== 'sps_extension_present_flag' && // Explicitly disable (u(1) after VUI)
                 field.name !== 'sps_range_extension_flag' && // Explicitly disable conditional extension flags
                 field.name !== 'sps_multilayer_extension_flag' && // Explicitly disable conditional extension flags
@@ -532,7 +531,7 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    // [MODIFIED] Updated warning to include sps_strong_intra_smoothing_enabled_flag
+    // [MODIFIED] Updated warning to include vui_parameters_present_flag consistency
     console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, num_short_term_ref_pic_sets, num_long_term_ref_pics_sps, etc.), fields after variable-length structures (like profile_tier_level, scaling_list_data, short_term_ref_pic_set loops, vui_parameters, etc.), conditional fields (like long_term_ref_pics_present_flag, sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag, vui_parameters_present_flag, sps_extension_present_flag, and their dependent fields), looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
@@ -684,8 +683,9 @@ function modifyStream() {
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
 //          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ...,
 //          num_short_term_ref_pic_sets, long_term_ref_pics_present_flag, num_long_term_ref_pics_sps,
-//          sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag, etc.).
-// [MODIFIED] Added sps_strong_intra_smoothing_enabled_flag to the check
+//          sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag,
+//          vui_parameters_present_flag, etc.).
+// [MODIFIED] Added vui_parameters_present_flag to the check
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -782,7 +782,7 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  // IMPORTANT: Cannot modify any fields after these initial ones
                  else {
                       // Throw an error if modification is attempted for known complex/unsupported fields
-                      // [MODIFIED] Added sps_strong_intra_smoothing_enabled_flag to the check
+                      // [MODIFIED] Added vui_parameters_present_flag to the check
                       if (fieldName === 'pic_width_in_luma_samples' ||
                           fieldName === 'pic_height_in_luma_samples' ||
                           fieldName === 'conformance_window_flag' ||
@@ -816,8 +816,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'long_term_ref_pics_present_flag' ||
                           fieldName === 'num_long_term_ref_pics_sps' ||
                           fieldName === 'sps_temporal_mvp_enabled_flag' ||
-                          fieldName === 'sps_strong_intra_smoothing_enabled_flag' || // ADDED TO ERROR CHECK
-                          fieldName === 'vui_parameters_present_flag' ||
+                          fieldName === 'sps_strong_intra_smoothing_enabled_flag' ||
+                          fieldName === 'vui_parameters_present_flag' || // ADDED TO ERROR CHECK
                           fieldName === 'sps_extension_present_flag' ||
                           fieldName === 'sps_range_extension_flag' ||
                           fieldName === 'sps_multilayer_extension_flag' ||
