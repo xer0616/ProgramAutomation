@@ -1,5 +1,5 @@
 
-const version = 12
+const version = 13
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -176,9 +176,9 @@ function extractFields(nalType, payloadData) {
     // WARNING: This parser is extremely basic. It only attempts to read a few
     // fixed-bit-length fields (u(n), f(n)) at the very START of specific NAL unit payloads.
     // It CANNOT parse:
-    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265.
-    //   - Fields located after variable-length fields (like profile_tier_level).
-    //   - Conditional fields based on previously parsed values.
+    //   - Exp-Golomb codes (ue(v), se(v)) which are common in H.265 (e.g., conf_win_left_offset).
+    //   - Fields located after variable-length fields (like profile_tier_level, or anything after ue(v)/se(v)).
+    //   - Conditional fields based on previously parsed values (like conf_win_left_offset depending on conformance_window_flag).
     //   - Fields requiring removal of emulation prevention bytes (0x000003 -> 0x0000).
     // A proper H.265 parser requires a bitstream reader capable of handling these complexities.
     let fields = [];
@@ -266,9 +266,16 @@ function extractFields(nalType, payloadData) {
              // Comes after pic_height_in_luma_samples. Cannot parse accurately.
              fields.push({ name: "conformance_window_flag", value: "Requires parsing AFTER pic_height_in_luma_samples" });
 
+             // --- Conformance Window Offsets (Conditional & ue(v)) ---
+             // These appear ONLY if conformance_window_flag is 1, and *after* that flag.
+             // They are ue(v) coded, making them impossible to parse/modify with this simple script.
+             fields.push({ name: "conf_win_left_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
+             fields.push({ name: "conf_win_right_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
+             fields.push({ name: "conf_win_top_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
+             fields.push({ name: "conf_win_bottom_offset", value: "Requires parsing conformance_window_flag (after ue(v)s) AND ue(v) parsing" });
+
             // --- Many more fields follow, often ue(v), se(v) or conditional ---
-            // Examples: conf_win_left_offset ue(v), conf_win_right_offset ue(v) (if conformance_window_flag is 1), ...,
-            // bit_depth_luma_minus8 ue(v), bit_depth_chroma_minus8 ue(v), log2_max_pic_order_cnt_lsb_minus4 ue(v),
+            // Examples: bit_depth_luma_minus8 ue(v), bit_depth_chroma_minus8 ue(v), log2_max_pic_order_cnt_lsb_minus4 ue(v),
             // sps_sub_layer_ordering_info_present_flag u(1), ... short_term_ref_pic_sets, ...
             // vui_parameters_present_flag u(1)...
             fields.push({ name: "...", value: "(Many more fields require complex parsing: ue(v), se(v), conditionals, loops, VUI, etc.)" });
@@ -338,6 +345,10 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'pic_width_in_luma_samples' && // Explicitly disable fields requiring ue(v) or complex offsets
                 field.name !== 'pic_height_in_luma_samples' && // Explicitly disable the height field too
                 field.name !== 'conformance_window_flag' && // Explicitly disable the conformance window flag too
+                field.name !== 'conf_win_left_offset' && // Explicitly disable the conformance window offsets
+                field.name !== 'conf_win_right_offset' &&
+                field.name !== 'conf_win_top_offset' &&
+                field.name !== 'conf_win_bottom_offset' &&
                 field.name !== 'pps_pic_parameter_set_id' &&
                 field.name !== 'pps_seq_parameter_set_id' &&
                 field.name !== 'dependent_slice_segments_enabled_flag';
@@ -388,7 +399,7 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag), fields after variable-length structures (like profile_tier_level), conditional fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height_in_luma_samples, conformance_window_flag, conf_win_left_offset), fields after variable-length structures (like profile_tier_level), conditional fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -397,6 +408,7 @@ function modifyStream() {
     // Create a mutable copy of the original data to work on
     const modified = new Uint8Array(originalData);
     let modifiedNalsIndices = new Set(); // Track which NAL display indices have pending modifications
+    let modificationErrorsOccurred = false; // Flag to track if any applyModificationsToNal failed
 
     try {
         // 1. Identify all enabled input fields where the value has actually changed
@@ -463,19 +475,18 @@ function modifyStream() {
                             console.log(`Applying modifications for NAL #${nalCount}, Type ${currentNalType}, Header Offset ${nalHeaderStartOffset}, Payload Offset ${nalStartOffset}`);
                             try {
                                 applyModificationsToNal(modified, nalStartOffset, i, currentNalType, editsByNal[nalCount]);
-                                modifiedNalsIndices.delete(nalCount); // Mark this NAL index as successfully processed
+                                // Successfully applied modifications for this NAL
                             } catch (error) {
-                                // applyModificationsToNal throws on error, preventing marking as processed
+                                // applyModificationsToNal throws on error
                                 console.error(`Failed to apply modifications to NAL #${nalCount}: ${error.message}. Aborting further modifications for this NAL.`);
-                                modifiedNalsIndices.delete(nalCount); // Remove from set, but note the failure
-                                // Decide whether to abort entirely or continue with other NALs
-                                // For now, log the error and continue, but return null at the end if errors occurred.
-                                // We can make this stricter later if needed.
+                                modificationErrorsOccurred = true; // Mark that an error happened
+                                // Still remove from set, but note the failure occurred
                             }
                         } else {
                             console.error(`NAL #${nalCount} found at offset ${nalHeaderStartOffset} is too short (less than 2 bytes for header). Cannot modify.`);
-                            modifiedNalsIndices.delete(nalCount); // Cannot process, remove from set
+                            modificationErrorsOccurred = true; // Mark error
                         }
+                         modifiedNalsIndices.delete(nalCount); // Mark this NAL index as processed (or failed)
                     }
                     nalCount++; // Increment NAL counter *after* processing the previous one
                 }
@@ -496,25 +507,32 @@ function modifyStream() {
                      try {
                          // Pass modified.length as the end offset for bounds checking
                         applyModificationsToNal(modified, nalStartOffset, modified.length, currentNalType, editsByNal[nalCount]);
-                        modifiedNalsIndices.delete(nalCount); // Mark as processed
+                        // Successfully applied modifications
                     } catch (error) {
                         console.error(`Failed to apply modifications to LAST NAL #${nalCount}: ${error.message}.`);
-                        modifiedNalsIndices.delete(nalCount); // Remove from set
+                        modificationErrorsOccurred = true; // Mark error
                     }
                  } else {
                      console.error(`LAST NAL #${nalCount} at offset ${nalHeaderStartOffset} is too short for header. Cannot modify.`);
-                     modifiedNalsIndices.delete(nalCount); // Cannot process
+                     modificationErrorsOccurred = true; // Mark error
                  }
+                 modifiedNalsIndices.delete(nalCount); // Mark as processed (or failed)
             }
             // No need to increment nalCount here as it represents the index of the last NAL
         }
 
 
-        // 3. Final Check: Ensure all requested modifications were applied
+        // 3. Final Check: Ensure all intended modifications were attempted and report errors
         if (modifiedNalsIndices.size > 0) {
-            console.error(`Modification process failed: Could not find or apply changes for NAL unit indices: ${[...modifiedNalsIndices].join(', ')}. The resulting file may be incomplete or corrupted.`);
+            // This shouldn't happen if the loop logic is correct, but check anyway
+            console.error(`Modification process failed: Could not find NAL unit indices: ${[...modifiedNalsIndices].join(', ')}.`);
+            modificationErrorsOccurred = true;
+        }
+
+        if (modificationErrorsOccurred) {
+            console.error("Errors occurred during the modification process. The resulting file may be corrupted or incomplete. Check previous logs.");
             // Return null to indicate failure to the download handler
-             return null;
+            return null;
         }
 
         console.log("Finished applying modifications (within supported limits).");
@@ -530,7 +548,8 @@ function modifyStream() {
 // Helper function to apply modifications to a specific NAL unit's payload data
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
-//          IT CANNOT MODIFY Exp-Golomb fields like pic_width/height_in_luma_samples or fields after them like conformance_window_flag.
+//          IT CANNOT MODIFY Exp-Golomb fields like pic_width/height_in_luma_samples,
+//          conformance_window_flag, or conf_win_left_offset (and related) or fields after them.
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -629,16 +648,25 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  }
                  // IMPORTANT: Cannot modify any fields after these initial ones (e.g., profile_tier_level,
                  // sps_seq_parameter_set_id, chroma_format_idc, pic_width_in_luma_samples, pic_height_in_luma_samples,
-                 // conformance_window_flag) because their offsets are unknown and/or they use Exp-Golomb encoding.
+                 // conformance_window_flag, conf_win_left_offset, etc.) because their offsets are unknown
+                 // and/or they use Exp-Golomb encoding.
                  // The input fields for these should be disabled by displayFields.
                  else {
-                      // This case handles attempts to modify fields that were potentially editable
-                      // but don't have specific modification logic here (should not happen with current setup).
-                      console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range (e.g., requires Exp-Golomb or offset calculation). Skipping modification for this field.`);
-                      // Explicitly check for the fields that cannot be modified here:
-                      if (fieldName === 'pic_width_in_luma_samples' || fieldName === 'pic_height_in_luma_samples' || fieldName === 'conformance_window_flag') {
+                      // Throw an error if modification is attempted for known complex/unsupported fields
+                      if (fieldName === 'pic_width_in_luma_samples' ||
+                          fieldName === 'pic_height_in_luma_samples' ||
+                          fieldName === 'conformance_window_flag' ||
+                          fieldName === 'conf_win_left_offset' ||
+                          fieldName === 'conf_win_right_offset' ||
+                          fieldName === 'conf_win_top_offset' ||
+                          fieldName === 'conf_win_bottom_offset' ||
+                          fieldName === 'sps_seq_parameter_set_id' ||
+                          fieldName === 'chroma_format_idc' ||
+                          fieldName === 'separate_colour_plane_flag') {
                             throw new Error(`FATAL: Attempted to modify '${fieldName}' which requires Exp-Golomb parsing/writing or complex offset calculation, not supported by this tool.`);
                       }
+                      // Warn for any other unexpected editable fields
+                      console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range (e.g., requires Exp-Golomb or offset calculation). Skipping modification for this field.`);
                  }
              }
              // --- AUD Fields (Type 35) --- Applicable only if nalType is 35
