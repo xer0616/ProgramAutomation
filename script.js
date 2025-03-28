@@ -1,5 +1,5 @@
 
-const version = 27
+const version = 28
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -172,7 +172,7 @@ function getNALName(nalType) {
     return nalMap[nalType] || `UNKNOWN (${nalType})`; // Fallback for unexpected values
 }
 
-function extractFields(nalType, payloadData) {
+function extractFields(nalUnitType, payloadData) {
     // WARNING: This parser is extremely basic. It only attempts to read a few
     // fixed-bit-length fields (u(n), f(n)) at the very START of specific NAL unit payloads.
     // It CANNOT parse:
@@ -186,7 +186,7 @@ function extractFields(nalType, payloadData) {
     if (payloadData.length === 0) return fields; // No payload to parse
 
     try {
-        if (nalType === 32) { // VPS_NUT (Video Parameter Set, Section 7.3.2.1)
+        if (nalUnitType === 32) { // VPS_NUT (Video Parameter Set, Section 7.3.2.1)
             if (payloadData.length < 4) { // Need at least 4 bytes for the first few fields we attempt to parse
                  fields.push({ name: "Payload Error", value: "Too short for initial VPS fields."});
                  return fields;
@@ -213,7 +213,7 @@ function extractFields(nalType, payloadData) {
             // ... and many more ue(v), conditional, loop fields ...
             fields.push({ name: "...", value: "(More fields require complex parsing: profile_tier_level, ue(v), loops, etc.)" });
 
-        } else if (nalType === 33) { // SPS_NUT (Sequence Parameter Set, Section 7.3.2.2)
+        } else if (nalUnitType === 33) { // SPS_NUT (Sequence Parameter Set, Section 7.3.2.2)
             if (payloadData.length < 1) { // Need at least 1 byte for the first few fields
                  fields.push({ name: "Payload Error", value: "Too short for initial SPS fields."});
                  return fields;
@@ -293,11 +293,11 @@ function extractFields(nalType, payloadData) {
             // Comes AFTER log2_min_transform_block_size_minus2.
             fields.push({ name: "log2_diff_max_min_transform_block_size", value: "Requires ue(v) parsing AFTER log2_min_transform_block_size_minus2" });
 
-            // --- max_transform_hierarchy_depth_inter: ue(v) --- [NEWLY ADDED FIELD]
+            // --- max_transform_hierarchy_depth_inter: ue(v) ---
             // Comes AFTER log2_diff_max_min_transform_block_size.
             fields.push({ name: "max_transform_hierarchy_depth_inter", value: "Requires ue(v) parsing AFTER log2_diff_max_min_transform_block_size" });
 
-             // --- max_transform_hierarchy_depth_intra: ue(v) --- [NEWLY ADDED FIELD]
+             // --- max_transform_hierarchy_depth_intra: ue(v) --- [MODIFIED]
             // Comes AFTER max_transform_hierarchy_depth_inter.
             fields.push({ name: "max_transform_hierarchy_depth_intra", value: "Requires ue(v) parsing AFTER max_transform_hierarchy_depth_inter" });
 
@@ -308,7 +308,7 @@ function extractFields(nalType, payloadData) {
             // vui_parameters_present_flag u(1)...
             fields.push({ name: "...", value: "(Many more fields require complex parsing: ue(v), se(v), conditionals, loops, VUI, etc.)" });
 
-        } else if (nalType === 34) { // PPS_NUT (Picture Parameter Set, Section 7.3.2.3)
+        } else if (nalUnitType === 34) { // PPS_NUT (Picture Parameter Set, Section 7.3.2.3)
             // pps_pic_parameter_set_id: ue(v)
             // pps_seq_parameter_set_id: ue(v)
             fields.push({ name: "pps_pic_parameter_set_id", value: "Requires Exp-Golomb (ue(v)) parsing" });
@@ -318,7 +318,7 @@ function extractFields(nalType, payloadData) {
              // --- Many more fields follow, heavily dependent on ue(v), se(v) and flags ---
             fields.push({ name: "...", value: "(Many more fields require complex parsing)" });
 
-        } else if (nalType === 35) { // AUD_NUT (Access Unit Delimiter, Section 7.3.2.4)
+        } else if (nalUnitType === 35) { // AUD_NUT (Access Unit Delimiter, Section 7.3.2.4)
              if (payloadData.length < 1) {
                  fields.push({ name: "Payload Error", value: "Too short for AUD pic_type field."});
                  return fields;
@@ -330,7 +330,7 @@ function extractFields(nalType, payloadData) {
         // Add parsing logic for other NAL types here if needed and feasible with the limited approach.
 
     } catch (e) {
-        console.error("Error during basic parsing of NAL unit payload (Type " + nalType + "): ", e);
+        console.error("Error during basic parsing of NAL unit payload (Type " + nalUnitType + "): ", e);
         // Add a field indicating a general parse error for this NAL unit
         fields.push({ name: "Parsing Error", value: "Could not reliably extract simple fields. Check console."});
     }
@@ -437,7 +437,8 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth*, etc.), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    // [MODIFIED] Updated warning to include max_transform_hierarchy_depth_intra
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, etc.), fields after variable-length structures (like profile_tier_level), conditional fields, looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -586,7 +587,7 @@ function modifyStream() {
 // Helper function to apply modifications to a specific NAL unit's payload data
 // WARNING: This function has the same limitations as modifyStream. It only handles
 //          a few specific fixed-bit fields at the absolute beginning of the payload.
-//          IT CANNOT MODIFY Exp-Golomb fields or fields after them.
+//          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ..., max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra).
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -692,6 +693,7 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                  // The input fields for these should be disabled by displayFields.
                  else {
                       // Throw an error if modification is attempted for known complex/unsupported fields
+                      // [MODIFIED] Added max_transform_hierarchy_depth_intra to the check
                       if (fieldName === 'pic_width_in_luma_samples' ||
                           fieldName === 'pic_height_in_luma_samples' ||
                           fieldName === 'conformance_window_flag' ||
@@ -710,8 +712,8 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'log2_diff_max_min_luma_coding_block_size' ||
                           fieldName === 'log2_min_transform_block_size_minus2' ||
                           fieldName === 'log2_diff_max_min_transform_block_size' ||
-                          fieldName === 'max_transform_hierarchy_depth_inter' || // [ADDED] Explicit check
-                          fieldName === 'max_transform_hierarchy_depth_intra' || // [ADDED] Explicit check
+                          fieldName === 'max_transform_hierarchy_depth_inter' ||
+                          fieldName === 'max_transform_hierarchy_depth_intra' ||
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
