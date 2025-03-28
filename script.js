@@ -1,5 +1,5 @@
 
-const version = 5
+const version = 6
 // Ensure the element exists before setting innerText
 const versionElement = document.getElementById("version");
 if (versionElement) {
@@ -90,7 +90,7 @@ function processNalUnit(nalUnitData) {
     const nalType = (headerByte1 & 0x7E) >> 1;
     // nuh_layer_id: u(6) (bit 0 of byte 0 combined with bits 7-3 of byte 1)
     // Corrected combination: Bit 0 of Byte 1 is actually part of temporal_id_plus1
-    const nuhLayerId = headerByte2 >> 3; // Upper 5 bits of byte 1
+    const nuhLayerId = ((headerByte1 & 0x01) << 5) | (headerByte2 >> 3); // Correct extraction for nuh_layer_id
     // nuh_temporal_id_plus1: u(3) (bits 2-0 of byte 1)
     const nuhTemporalIdPlus1 = headerByte2 & 0x07;
 
@@ -115,7 +115,7 @@ function processNalUnit(nalUnitData) {
 
     // Display the extracted fields
     if (fields.length > 0) {
-        displayFields(nalName, nalType, fields);
+        displayFields(nalName, nalType, fields, nuhLayerId, nuhTemporalIdPlus1); // Pass header fields
     }
 }
 
@@ -171,7 +171,7 @@ function extractFields(nalType, payloadData) {
     try {
         if (nalType === 32) { // VPS_NUT (Video Parameter Set - ITU-T H.265 Section 7.3.2.1)
              // Check sufficient length for the fixed initial fields
-            if (payloadData.length < 4) {
+            if (payloadData.length < 4) { // Need 4 bytes for vps_reserved_0xffff_16bits
                 fields.push({ name: "ERROR", value: "Payload too short for initial VPS fields", type: 'error' });
                 return fields;
             }
@@ -203,7 +203,7 @@ function extractFields(nalType, payloadData) {
             fields.push({ name: "vps_max_sub_layers_minus1", value: vps_max_sub_layers_minus1, bits: 3, type: 'u' });
             currentBitOffset += 3; // Now at 15 bits total
 
-            // vps_temporal_id_nesting_flag: u(1) -> bit 0 of byte 1
+            // vps_temporal_id_nesting_flag: u(1) -> bit 0 of byte 1 (Corrected based on spec H.265 7.3.2.1)
             const vps_temporal_id_nesting_flag = payloadData[1] & 0x01;
             fields.push({ name: "vps_temporal_id_nesting_flag", value: vps_temporal_id_nesting_flag, bits: 1, type: 'u' });
             currentBitOffset += 1; // Now at 16 bits total (2 bytes)
@@ -298,10 +298,37 @@ function extractFields(nalType, payloadData) {
     return fields;
 }
 
-function displayFields(nalName, nalType, fields) {
+// Added nuhLayerId, nuhTemporalIdPlus1 to display NAL header info as well
+function displayFields(nalName, nalType, fields, nuhLayerId, nuhTemporalIdPlus1) {
     const container = document.getElementById("fieldsContainer");
     if (!container) return;
 
+    // --- Display NAL Header Fields First ---
+    const headerFields = [
+        { name: "nuh_layer_id", value: nuhLayerId, bits: 6, type: 'u', comment: "From NAL Header" },
+        { name: "nuh_temporal_id_plus1", value: nuhTemporalIdPlus1, bits: 3, type: 'u', comment: "From NAL Header" }
+    ];
+
+    headerFields.forEach((field, index) => {
+        const fieldDiv = document.createElement("div");
+        fieldDiv.className = "field header-field"; // Add class to distinguish header fields
+
+        // Use a unique identifier
+        const sanitizedFieldName = field.name.replace(/\W/g, '_');
+        const inputId = `nal-${nalType}-header-${sanitizedFieldName}-${index}`;
+
+        // Header fields are generally considered read-only in this context
+        const isReadOnly = true;
+        const titleValue = field.comment ? ` title="${field.comment}"` : '';
+
+        fieldDiv.innerHTML = `
+            <label for="${inputId}"${titleValue}>${nalName} - ${field.name}:</label>
+            <input type="text" id="${inputId}" data-nal-type="${nalType}" data-field-name="${field.name}" data-field-index="${index}" data-original-value="${field.value}" data-field-type="${field.type}" data-field-bits="${field.bits || ''}" value="${field.value}" ${isReadOnly ? 'readonly style="background-color:#eee;"' : ''}>
+            <span class="field-info">(${field.type}${field.bits ? `(${field.bits})` : ''})${field.comment ? ' ℹ️' : ''}</span>`;
+        container.appendChild(fieldDiv);
+    });
+
+    // --- Display Payload Fields ---
     fields.forEach((field, index) => {
         const fieldDiv = document.createElement("div");
         fieldDiv.className = "field";
@@ -309,7 +336,8 @@ function displayFields(nalName, nalType, fields) {
         // Use a unique identifier for each input based on NAL type and field name/index
         // Sanitize name for ID: replace non-alphanumeric with underscore
         const sanitizedFieldName = field.name.replace(/\W/g, '_');
-        const inputId = `nal-${nalType}-field-${sanitizedFieldName}-${index}`;
+        // Append 'payload' to avoid ID collision with potential header fields of the same name
+        const inputId = `nal-${nalType}-payload-${sanitizedFieldName}-${index}`;
 
         // Determine if field should be read-only
         const isReadOnly = field.type === 'struct' || field.type === 'ue' || field.type === 'error' ||
@@ -399,7 +427,7 @@ function modifyStream() {
     let nalStartByteOffset = -1; // Offset in the *originalData* / *modifiedData* array where the NAL unit *payload* starts
     let nalUnitStartCodeLen = 0; // Length of the start code for the current NAL unit
     let zeroCount = 0;
-    let nalUnitIndex = 0; // Keep track of NAL units processed for matching UI elements
+    let nalUnitIndex = 0; // Keep track of NAL units processed for matching UI elements (Still fragile)
 
     for (let i = 0; i < originalData.length; i++) {
         if (zeroCount >= 2 && originalData[i] === 1) {
@@ -458,25 +486,23 @@ function applyModificationsToNal(modifiedData, nalUnitOffset, nalUnitLength, nal
          return false;
     }
 
-    // Find corresponding input fields for this NAL type *and* this specific NAL occurrence (index)
-    // We need a way to link the NAL unit being processed back to the specific set of input fields created for it.
-    // Let's assume the order of NAL units found matches the order the fields were added to the DOM.
-    // We'll select inputs based on NAL type and then filter by their original creation index (implicitly).
-    // This is fragile if the DOM structure changes or NAL units are added/removed dynamically.
-    // A better approach might involve storing NAL unit metadata alongside the fields.
-    // For now, we rely on the sequential processing matching the DOM order.
+    // Find corresponding input fields for this NAL type *payload*
+    // This still assumes the order matches the DOM order, which is fragile.
+    // Select only payload fields for modification (ignoring header fields displayed)
+    const potentialInputs = document.querySelectorAll(`#fieldsContainer input[data-nal-type="${nalType}"][id^="nal-${nalType}-payload-"]`);
 
-    const potentialInputs = document.querySelectorAll(`#fieldsContainer input[data-nal-type="${nalType}"]`);
-    // This selects *all* inputs for a given NAL type. We need to associate them with *this* specific NAL.
-    // Let's assume `displayFields` adds fields for one NAL unit sequentially before moving to the next.
-    // We can estimate which inputs belong to this NAL unit based on the `nalUnitIndex`.
-    // This requires calculating how many fields each NAL type *typically* generates.
-    // --> THIS IS TOO COMPLEX AND ERROR PRONE FOR THIS SIMPLE SCRIPT.
-    // --> REVERTING to simpler approach: Apply change if *any* input for this NAL type has changed.
-    // This means if you have multiple VPS NALs, changing a field in the UI will attempt
-    // to apply that change to *ALL* VPS NALs in the stream that have that field.
+    // Rough check if these inputs belong to the current nalUnitIndex (extremely fragile assumption)
+    // A better system would store NAL unit metadata with the input elements.
+    // For now, apply changes to all matching fields found. If multiple NALs of the
+    // same type exist, changing one UI field will attempt to change it in all of them.
 
     potentialInputs.forEach(input => {
+        // Check if this input field logically belongs to the current NAL unit index
+        // This requires knowing how many fields each NAL type generates, which is complex.
+        // --> Skipping this index check for now and applying to all matched inputs.
+        // const fieldIndexInDOM = parseInt(input.dataset.fieldIndex, 10);
+        // if (/* logic to map nalUnitIndex to expected fieldIndexInDOM range */) { ... }
+
         const fieldName = input.dataset.fieldName;
         const originalValueStr = input.dataset.originalValue; // Value originally extracted
         const currentValueStr = input.value; // Current value in the input box
@@ -485,7 +511,6 @@ function applyModificationsToNal(modifiedData, nalUnitOffset, nalUnitLength, nal
 
         // Only proceed if the value has actually changed from the original display AND is not read-only/placeholder
         if (currentValueStr === originalValueStr || input.readOnly || originalValueStr === "..." || !fieldName) {
-            // console.log(`Skipping ${fieldName} - no change or read-only.`);
             return;
         }
 
