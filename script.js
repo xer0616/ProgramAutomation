@@ -1,5 +1,5 @@
 
-const version = 43
+const version = 44
 document.getElementById("version").innerText = version;
 let originalData = null;
 
@@ -334,51 +334,55 @@ function extractFields(nalUnitType, payloadData) {
             // Comes AFTER conditional PCM fields
             fields.push({ name: "num_short_term_ref_pic_sets", value: "Requires ue(v) parsing AFTER PCM fields" });
 
-            // --- short_term_ref_pic_set() loop --- ADDED placeholder
+            // --- short_term_ref_pic_set() loop ---
             // Loop runs `num_short_term_ref_pic_sets` times. Each iteration parses a complex structure.
             fields.push({ name: "short_term_ref_pic_set()", value: "(Loop structure skipped - requires parsing num_short_term_ref_pic_sets and complex internal fields)" });
 
-            // --- long_term_ref_pics_present_flag: u(1) --- ADDED
+            // --- long_term_ref_pics_present_flag: u(1) ---
             // Comes AFTER the short_term_ref_pic_set() loop
             fields.push({ name: "long_term_ref_pics_present_flag", value: "Requires parsing AFTER short_term_ref_pic_set() loop" });
 
-            // --- Conditional Long Term Ref Pic fields (ue(v) etc) --- ADDED placeholder
+            // --- Conditional Long Term Ref Pic fields (ue(v) etc) ---
             // Appear if long_term_ref_pics_present_flag is 1. Cannot parse reliably.
             fields.push({ name: "num_long_term_ref_pics_sps", value: "Requires parsing long_term_ref_pics_present_flag AND ue(v) parsing" });
             fields.push({ name: "lt_ref_pic_poc_lsb_sps[i]", value: "Requires parsing num_long_term_ref_pics_sps AND u(v) parsing within loop" });
             fields.push({ name: "used_by_curr_pic_lt_sps_flag[i]", value: "Requires parsing num_long_term_ref_pics_sps AND u(1) parsing within loop" });
 
-            // --- sps_temporal_mvp_enabled_flag: u(1) --- ADDED placeholder
+            // --- sps_temporal_mvp_enabled_flag: u(1) ---
             // Comes AFTER the conditional Long Term Ref Pic fields.
             fields.push({ name: "sps_temporal_mvp_enabled_flag", value: "Requires parsing AFTER LTRP fields" });
 
-            // --- sps_strong_intra_smoothing_enabled_flag: u(1) --- ADDED placeholder (THIS IS THE TARGET FIELD)
+            // --- sps_strong_intra_smoothing_enabled_flag: u(1) ---
             // Comes AFTER sps_temporal_mvp_enabled_flag.
             fields.push({ name: "sps_strong_intra_smoothing_enabled_flag", value: "Requires parsing AFTER sps_temporal_mvp_enabled_flag" });
 
-            // --- vui_parameters_present_flag: u(1) --- ADDED placeholder (INCLUDED AS REQUESTED)
+            // --- vui_parameters_present_flag: u(1) ---
             // Comes AFTER sps_strong_intra_smoothing_enabled_flag.
             fields.push({ name: "vui_parameters_present_flag", value: "Requires parsing AFTER sps_strong_intra_smoothing_enabled_flag" });
 
-            // --- vui_parameters() --- ADDED placeholder
+            // --- vui_parameters() ---
             // Conditional structure AFTER vui_parameters_present_flag. Very complex.
             fields.push({ name: "vui_parameters()", value: "(Structure skipped - conditional & very complex)" });
 
-            // --- sps_extension_present_flag: u(1) --- ADDED placeholder
+            // --- sps_extension_present_flag: u(1) ---  *** This is the main flag for extensions ***
             // Comes AFTER vui_parameters() or vui_parameters_present_flag.
             fields.push({ name: "sps_extension_present_flag", value: "Requires parsing AFTER VUI fields" });
 
-            // --- Further extensions flags/data --- ADDED placeholder
+            // --- Further extensions flags/data ---
+            // These are conditional on sps_extension_present_flag being 1
             fields.push({ name: "sps_range_extension_flag", value: "Conditional on sps_extension_present_flag" });
             fields.push({ name: "sps_multilayer_extension_flag", value: "Conditional on sps_extension_present_flag" });
             fields.push({ name: "sps_3d_extension_flag", value: "Conditional on sps_extension_present_flag" });
             fields.push({ name: "sps_scc_extension_flag", value: "Conditional on sps_extension_present_flag" });
             fields.push({ name: "sps_extension_4bits", value: "Conditional on sps_extension_present_flag" });
 
-            // --- Extension Data Structures --- ADDED placeholder
+            // --- Extension Data Structures ---
+            // These are conditional on their respective flags being 1
             fields.push({ name: "sps_range_extension()", value: "(Structure skipped - conditional & complex)" });
             fields.push({ name: "sps_multilayer_extension()", value: "(Structure skipped - conditional & complex)" });
-            // ... etc for other extensions ...
+            fields.push({ name: "sps_3d_extension()", value: "(Structure skipped - conditional & complex)" });
+            fields.push({ name: "sps_scc_extension()", value: "(Structure skipped - conditional & complex)" });
+            // ... etc for other extensions based on sps_extension_4bits ...
 
             // --- Final "..." placeholder for anything missed or future additions ---
             fields.push({ name: "...", value: "(End of SPS or requires parsing extensions, rbsp_trailing_bits)" });
@@ -438,6 +442,7 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 !field.name.includes(" Error") && // Exclude "Payload Error", "Parsing Error"
                 !field.name.includes("(Structure skipped") &&
                 !field.name.includes("Requires ") && // Excludes "Requires Exp-Golomb", "Requires ue(v)..." etc.
+                !field.name.includes("Conditional on ") && // Excludes extension flags like "Conditional on sps_extension_present_flag"
                 !field.name.startsWith("reserved") && // Generally don't edit reserved fields (though possible)
                 // Specific non-editable fields based on parsing limitations
                 field.name !== 'sps_seq_parameter_set_id' &&
@@ -474,7 +479,7 @@ function displayFields(nalName, fields, nalUnitType, layerId, temporalId, nalInd
                 field.name !== 'num_long_term_ref_pics_sps' && // Explicitly disable (conditional ue(v))
                 field.name !== 'sps_temporal_mvp_enabled_flag' && // Explicitly disable (u(1) after LTRP)
                 field.name !== 'sps_strong_intra_smoothing_enabled_flag' && // Explicitly disable (u(1) after MVP)
-                field.name !== 'vui_parameters_present_flag' && // Explicitly disable (u(1) after SIS) - INCLUDED AS REQUESTED
+                field.name !== 'vui_parameters_present_flag' && // Explicitly disable (u(1) after SIS)
                 field.name !== 'sps_extension_present_flag' && // Explicitly disable (u(1) after VUI)
                 field.name !== 'sps_range_extension_flag' && // Explicitly disable conditional extension flags
                 field.name !== 'sps_multilayer_extension_flag' && // Explicitly disable conditional extension flags
@@ -531,8 +536,8 @@ document.getElementById("downloadBtn").addEventListener("click", function() {
 
 function modifyStream() {
     // ** IMPORTANT WARNING **
-    // [MODIFIED] Updated warning to include vui_parameters_present_flag consistency
-    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, num_short_term_ref_pic_sets, num_long_term_ref_pics_sps, etc.), fields after variable-length structures (like profile_tier_level, scaling_list_data, short_term_ref_pic_set loops, vui_parameters, etc.), conditional fields (like long_term_ref_pics_present_flag, sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag, vui_parameters_present_flag, sps_extension_present_flag, and their dependent fields), looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
+    // Updated warning to reflect SPS extension flags limitations
+    console.warn("modifyStream function has SEVERE LIMITATIONS. It can ONLY reliably modify simple, fixed-bit-length fields (u(n)) located at the very BEGINNING of VPS, SPS, or AUD payloads. It CANNOT handle Exp-Golomb fields (like pic_width/height, conf_win_*, bit_depth_*, log2_max_poc_lsb, sps_max_dec_pic_buffering, log2_min/max luma/transform block sizes, max_transform_hierarchy_depth_inter, max_transform_hierarchy_depth_intra, num_short_term_ref_pic_sets, num_long_term_ref_pics_sps, etc.), fields after variable-length structures (like profile_tier_level, scaling_list_data, short_term_ref_pic_set loops, vui_parameters, extension structures, etc.), conditional fields (like long_term_ref_pics_present_flag, sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag, vui_parameters_present_flag, sps_extension_present_flag, sps_range_extension_flag, sps_multilayer_extension_flag, sps_3d_extension_flag, sps_scc_extension_flag, sps_extension_4bits, and their dependent fields), looping fields, or fields requiring emulation prevention byte handling. Modifications to other fields will likely CORRUPT the bitstream.");
 
     if (!originalData) {
         console.error("Original data is not loaded. Cannot modify.");
@@ -684,8 +689,8 @@ function modifyStream() {
 //          IT CANNOT MODIFY Exp-Golomb fields or fields after them (e.g. pic_width/height, ...,
 //          num_short_term_ref_pic_sets, long_term_ref_pics_present_flag, num_long_term_ref_pics_sps,
 //          sps_temporal_mvp_enabled_flag, sps_strong_intra_smoothing_enabled_flag,
-//          vui_parameters_present_flag, etc.).
-// [MODIFIED] Added vui_parameters_present_flag to the check
+//          vui_parameters_present_flag, sps_extension_present_flag, sps_range_extension_flag, etc.).
+// [MODIFIED] Added SPS extension flags to the check
 function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, nalType, inputsToApply) {
     // Basic validation of offsets
     if (payloadOffset < 0 || payloadOffset > modifiedData.length || payloadEndOffset < payloadOffset || payloadEndOffset > modifiedData.length) {
@@ -713,6 +718,7 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
          try {
              // --- NAL Header Fields ---
              // Modification of header fields is generally complex and not implemented here.
+             // We allow modification only for fields explicitly handled below.
 
              // --- VPS Fields (Type 32) --- Applicable only if nalType is 32
              if (nalType === 32) {
@@ -743,13 +749,13 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                      checkPayloadBounds(1);
                      newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 7) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0-7.`);
-                     // Clear bits 4-6 of byte 1 (mask 0000 1110), then set them
+                     // Clear bits 4-6 of byte 1 (mask 0000 1110 -> ~0x0E = 1111 0001), then set them
                      modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & ~0x0E) | (newValue << 1);
                  } else if (fieldName === 'vps_temporal_id_nesting_flag') { // u(1) in byte 1
                      checkPayloadBounds(1);
                      newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 1) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0 or 1.`);
-                      // Clear bit 7 of byte 1 (mask 0000 0001), then set it
+                      // Clear bit 7 of byte 1 (mask 0000 0001 -> ~0x01 = 1111 1110), then set it
                      modifiedData[payloadOffset + 1] = (modifiedData[payloadOffset + 1] & ~0x01) | (newValue & 0x01);
                  }
                  // Note: vps_reserved_0xffff_16bits is marked as non-editable, so no modification logic here.
@@ -770,19 +776,19 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                      checkPayloadBounds(0);
                      newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 7) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0-7.`);
-                     // Clear bits 4-6 of byte 0 (mask 0000 1110), then set them
+                     // Clear bits 4-6 of byte 0 (mask 0000 1110 -> ~0x0E = 1111 0001), then set them
                      modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0x0E) | (newValue << 1);
                  } else if (fieldName === 'sps_temporal_id_nesting_flag') { // u(1) in byte 0
                      checkPayloadBounds(0);
                      newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 1) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0 or 1.`);
-                      // Clear bit 7 of byte 0 (mask 0000 0001), then set it
+                      // Clear bit 7 of byte 0 (mask 0000 0001 -> ~0x01 = 1111 1110), then set it
                       modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0x01) | (newValue & 0x01);
                  }
                  // IMPORTANT: Cannot modify any fields after these initial ones
                  else {
                       // Throw an error if modification is attempted for known complex/unsupported fields
-                      // [MODIFIED] Added vui_parameters_present_flag to the check
+                      // [MODIFIED] Added SPS extension flags to the error check
                       if (fieldName === 'pic_width_in_luma_samples' ||
                           fieldName === 'pic_height_in_luma_samples' ||
                           fieldName === 'conformance_window_flag' ||
@@ -817,13 +823,13 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                           fieldName === 'num_long_term_ref_pics_sps' ||
                           fieldName === 'sps_temporal_mvp_enabled_flag' ||
                           fieldName === 'sps_strong_intra_smoothing_enabled_flag' ||
-                          fieldName === 'vui_parameters_present_flag' || // ADDED TO ERROR CHECK
-                          fieldName === 'sps_extension_present_flag' ||
-                          fieldName === 'sps_range_extension_flag' ||
-                          fieldName === 'sps_multilayer_extension_flag' ||
-                          fieldName === 'sps_3d_extension_flag' ||
-                          fieldName === 'sps_scc_extension_flag' ||
-                          fieldName === 'sps_extension_4bits' ||
+                          fieldName === 'vui_parameters_present_flag' ||
+                          fieldName === 'sps_extension_present_flag' || // ADDED TO ERROR CHECK
+                          fieldName === 'sps_range_extension_flag' ||   // ADDED TO ERROR CHECK
+                          fieldName === 'sps_multilayer_extension_flag' ||// ADDED TO ERROR CHECK
+                          fieldName === 'sps_3d_extension_flag' ||      // ADDED TO ERROR CHECK
+                          fieldName === 'sps_scc_extension_flag' ||     // ADDED TO ERROR CHECK
+                          fieldName === 'sps_extension_4bits' ||        // ADDED TO ERROR CHECK
                           fieldName === 'sps_seq_parameter_set_id' ||
                           fieldName === 'chroma_format_idc' ||
                           fieldName === 'separate_colour_plane_flag' ||
@@ -840,12 +846,22 @@ function applyModificationsToNal(modifiedData, payloadOffset, payloadEndOffset, 
                       checkPayloadBounds(0);
                       newValue = parseInt(newValueStr, 10);
                      if (isNaN(newValue) || newValue < 0 || newValue > 7) throw new Error(`Invalid value for ${fieldName}: '${newValueStr}'. Must be 0-7.`);
-                     // Clear bits 5-7 of byte 0 (mask 0001 1111), then set them (These are bits 0, 1, 2 in the field)
+                     // Clear bits 5-7 of byte 0 (mask 1110 0000 -> ~0xE0 = 0001 1111), then set them
                      modifiedData[payloadOffset] = (modifiedData[payloadOffset] & ~0xE0) | (newValue << 5);
                  }
                  else {
                       console.warn(`Modification logic for field '${fieldName}' in NAL type ${nalType} is not implemented or field is beyond the reliably modifiable range. Skipping modification for this field.`);
                  }
+             }
+             // --- PPS Fields (Type 34) --- Currently no editable fields supported
+             else if (nalType === 34) {
+                 // Explicitly throw error for known unsupported PPS fields if they were somehow enabled
+                 if (fieldName === 'pps_pic_parameter_set_id' ||
+                     fieldName === 'pps_seq_parameter_set_id' ||
+                     fieldName === 'dependent_slice_segments_enabled_flag') {
+                       throw new Error(`FATAL: Attempted to modify '${fieldName}' in PPS which requires Exp-Golomb parsing/writing or complex offset calculation, none of which are supported by this tool.`);
+                 }
+                 console.warn(`Modification requested for field '${fieldName}' in NAL type ${nalType} (PPS), but modification logic for PPS is not implemented. Skipping.`);
              }
              // --- Add other NAL types IF simple, fixed-bit fields at the start need modification ---
              else {
